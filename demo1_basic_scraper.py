@@ -1,6 +1,6 @@
 """
-Scrapes player stats → saves CSV → saves a plain HTML table you can open on your phone.
-Re-run to refresh.
+Scrapes a specific game boxscore from sports-reference.com
+→ saves CSV → saves a plain HTML table → pushes to GitHub
 
 INSTALL:
   pip install requests beautifulsoup4
@@ -12,17 +12,15 @@ RUN:
 import requests
 from bs4 import BeautifulSoup
 import csv
-import time
-import sys
+import subprocess
 from datetime import datetime
-from pyngrok import ngrok
+import schedule
+import time
 
 # ── Config ────────────────────────────────────────────────────────────────────
-BASE_URL      = "https://www.sports-reference.com"
-TEAM_SLUG     = "kansas"
-SEASON        = "2024"
-OUTPUT_CSV    = "player_stats.csv"
-OUTPUT_HTML   = "dashboard.html"
+BOXSCORE_URL = "https://www.sports-reference.com/cbb/boxscores/2026-04-06-20-michigan.html"
+OUTPUT_CSV   = "player_stats.csv"
+OUTPUT_HTML  = "dashboard.html"
 
 HEADERS = {
     "User-Agent": (
@@ -36,78 +34,74 @@ HEADERS = {
 
 # ── Scraper ───────────────────────────────────────────────────────────────────
 
-def get_team_stats(team_slug, season):
-    url = f"{BASE_URL}/cbb/schools/{team_slug}/{season}.html"
+def get_boxscore(url):
     print(f"Fetching: {url}")
     response = requests.get(url, headers=HEADERS, timeout=15)
     if response.status_code != 200:
         print(f"Got status {response.status_code}. Exiting.")
-        sys.exit(1)
+        return []
     print(f"Status: {response.status_code} OK")
+
     soup = BeautifulSoup(response.text, "html.parser")
+    all_players = []
 
-    players = []
+    # SR boxscores have two tables — one per team
+    # They're usually buried in HTML comments
+    import re
+    comments = soup.find_all(string=lambda t: isinstance(t, str) and "basic" in t)
 
-    # SR hides tables in HTML comments — check there first
-    comments = soup.find_all(string=lambda t: isinstance(t, str) and "per_game" in t)
+    tables_found = []
     for comment in comments:
         comment_soup = BeautifulSoup(comment, "html.parser")
-        table = comment_soup.find("table", {"id": "per_game"})
-        if table:
-            players = parse_table(table)
-            break
+        for table in comment_soup.find_all("table"):
+            tid = table.get("id", "")
+            if "basic" in tid and "box" in tid:
+                tables_found.append((tid, table))
 
-    if not players:
-        table = soup.find("table", {"id": "per_game"})
-        if table:
-            players = parse_table(table)
+    # Fallback: visible tables
+    if not tables_found:
+        for table in soup.find_all("table"):
+            tid = table.get("id", "")
+            if "basic" in tid and "box" in tid:
+                tables_found.append((tid, table))
 
-    if not players:
-        for t in soup.find_all("table"):
-            if len(t.find_all("tr")) > 5:
-                players = parse_table_generic(t)
-                if players:
-                    break
+    for tid, table in tables_found:
+        # Derive team name from table id e.g. "box-michigan-game-basic"
+        parts = tid.replace("box-", "").replace("-game-basic", "").replace("-basic", "")
+        team_name = parts.replace("-", " ").title()
+        players = parse_table(table, team_name)
+        all_players.extend(players)
 
-    return players
+    return all_players
 
 
-def parse_table(table):
+def parse_table(table, team_name):
     players = []
     headers = []
+
     thead = table.find("thead")
     if thead:
         for th in thead.find_all("th"):
             headers.append(th.get("data-stat", th.text.strip()))
-    for row in table.find("tbody").find_all("tr"):
+
+    tbody = table.find("tbody")
+    if not tbody:
+        return players
+
+    for row in tbody.find_all("tr"):
         if "class" in row.attrs and "thead" in row["class"]:
             continue
         if not row.find("td"):
             continue
         cells = row.find_all(["th", "td"])
-        player = {}
+        player = {"team": team_name}
         for i, cell in enumerate(cells):
             key = headers[i] if i < len(headers) else f"col_{i}"
             player[key] = cell.text.strip()
-        if player.get("player") or player.get("name_display"):
+        name = player.get("player") or player.get("name_display", "")
+        if name and name.lower() not in ("reserves", "team totals", ""):
             players.append(player)
-    return players
 
-
-def parse_table_generic(table):
-    rows = table.find_all("tr")
-    if not rows:
-        return []
-    headers = [c.text.strip() for c in rows[0].find_all(["th", "td"])]
-    if not any(headers):
-        return []
-    players = []
-    for row in rows[1:]:
-        cells = row.find_all(["th", "td"])
-        if not cells:
-            continue
-        players.append({headers[i]: cells[i].text.strip()
-                        for i in range(min(len(headers), len(cells)))})
     return players
 
 
@@ -118,17 +112,17 @@ def save_csv(data, filename):
         print("No data to save.")
         return
     clean = [{k: v for k, v in row.items() if k} for row in data]
+    all_keys = list(clean[0].keys())
     with open(filename, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(clean[0].keys()), extrasaction="ignore")
+        writer = csv.DictWriter(f, fieldnames=all_keys, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(clean)
     print(f"CSV saved -> {filename}")
 
 
-# ── Save HTML (reads directly from CSV so columns always match) ───────────────
+# ── Save HTML from CSV ────────────────────────────────────────────────────────
 
-def save_html_from_csv(csv_file, html_file, team, season):
-    """Read the CSV we just wrote and turn it into a plain HTML table."""
+def save_html_from_csv(csv_file, html_file):
     rows = []
     with open(csv_file, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -141,20 +135,27 @@ def save_html_from_csv(csv_file, html_file, team, season):
         return
 
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
-
     th_cells = "".join(f"<th>{h}</th>" for h in headers)
 
-    tr_rows = ""
+    # Group by team
+    teams = {}
     for row in rows:
-        td_cells = "".join(f"<td>{row.get(h, '')}</td>" for h in headers)
-        tr_rows += f"<tr>{td_cells}</tr>\n"
+        team = row.get("team", "Unknown")
+        teams.setdefault(team, []).append(row)
+
+    body = ""
+    for team, players in teams.items():
+        body += f'<tr><td colspan="{len(headers)}" style="background:#ddd;font-weight:bold;padding:6px 8px;">{team}</td></tr>\n'
+        for row in players:
+            td_cells = "".join(f"<td>{row.get(h, '')}</td>" for h in headers)
+            body += f"<tr>{td_cells}</tr>\n"
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{team.title()} {season} Stats</title>
+<title>2026 NCAA Championship Boxscore</title>
 <style>
   body {{
     font-family: Arial, sans-serif;
@@ -165,31 +166,25 @@ def save_html_from_csv(csv_file, html_file, team, season):
   }}
   h2 {{ margin: 0 0 4px 0; }}
   p  {{ margin: 0 0 10px 0; color: #555; font-size: 11px; }}
-  table {{
-    border-collapse: collapse;
-    width: 100%;
-  }}
+  table {{ border-collapse: collapse; width: 100%; }}
   th, td {{
     border: 1px solid #ccc;
     padding: 5px 8px;
     text-align: left;
     white-space: nowrap;
   }}
-  th {{
-    background: #f0f0f0;
-    font-weight: bold;
-  }}
+  th {{ background: #f0f0f0; font-weight: bold; }}
   tr:nth-child(even) {{ background: #f9f9f9; }}
   tr:hover {{ background: #fffbcc; }}
 </style>
 </head>
 <body>
-<h2>{team.title()} — {season} Per-Game Stats</h2>
+<h2>2026 NCAA Championship — Michigan vs UConn</h2>
 <p>Last updated: {now} · Re-run script to refresh</p>
 <div style="overflow-x:auto">
 <table>
   <thead><tr>{th_cells}</tr></thead>
-  <tbody>{tr_rows}</tbody>
+  <tbody>{body}</tbody>
 </table>
 </div>
 </body>
@@ -200,16 +195,34 @@ def save_html_from_csv(csv_file, html_file, team, season):
     print(f"HTML saved -> {html_file}")
 
 
+# ── Push to GitHub ────────────────────────────────────────────────────────────
+
+def push_to_github():
+    try:
+        subprocess.run(["git", "add", "dashboard.html", "player_stats.csv"], check=True)
+        subprocess.run(["git", "commit", "-m", f"refresh {datetime.now().strftime('%Y-%m-%d %H:%M')}"], check=True)
+        subprocess.run(["git", "push"], check=True)
+        print("Pushed to GitHub.")
+    except subprocess.CalledProcessError as e:
+        print(f"Git push failed: {e}")
+
+# ── Job ──────────────────────────────────────────────────────────────────────
+
+def job():
+    players = get_boxscore(BOXSCORE_URL)
+    if players:
+        save_csv(players, OUTPUT_CSV)
+        save_html_from_csv(OUTPUT_CSV, OUTPUT_HTML)
+        push_to_github()
+    else:
+        print("No data found.")
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    players = get_team_stats(TEAM_SLUG, SEASON)
-    if players:
-        print(f"Found {len(players)} players.")
-        save_csv(players, OUTPUT_CSV)
-        save_html_from_csv(OUTPUT_CSV, OUTPUT_HTML, TEAM_SLUG, SEASON)
-        url = ngrok.connect(8080)
-        print(f"Open on your phone: {url}")
-    else:
-        print("No player data found.")
-    time.sleep(1)
+    job()
+    schedule.every(5).minutes.do(job)
+    print("Running every 5 minutes. Press CTRL+C to stop.")
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
