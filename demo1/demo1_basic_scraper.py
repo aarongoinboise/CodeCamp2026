@@ -45,10 +45,9 @@ def get_boxscore(url):
     soup = BeautifulSoup(response.text, "html.parser")
     all_players = []
 
-    # SR boxscores have two tables — one per team
-    # They're usually buried in HTML comments
-    import re
-    comments = soup.find_all(string=lambda t: isinstance(t, str) and "basic" in t)
+    # SR buries tables in HTML comments — parse them out
+    from bs4 import Comment
+    comments = soup.find_all(string=lambda t: isinstance(t, Comment))
 
     tables_found = []
     for comment in comments:
@@ -66,9 +65,14 @@ def get_boxscore(url):
                 tables_found.append((tid, table))
 
     for tid, table in tables_found:
-        # Derive team name from table id e.g. "box-michigan-game-basic"
-        parts = tid.replace("box-", "").replace("-game-basic", "").replace("-basic", "")
-        team_name = parts.replace("-", " ").title()
+        # table id format: "box-connecticut-game-basic" or "box-michigan-game-basic"
+        team_name = (
+            tid.replace("box-", "")
+               .replace("-game-basic", "")
+               .replace("-basic", "")
+               .replace("-", " ")
+               .title()
+        )
         players = parse_table(table, team_name)
         all_players.extend(players)
 
@@ -77,30 +81,41 @@ def get_boxscore(url):
 
 def parse_table(table, team_name):
     players = []
-    headers = []
 
+    # Get headers from data-stat attributes — these are the clean column keys
+    headers = []
     thead = table.find("thead")
     if thead:
-        for th in thead.find_all("th"):
-            headers.append(th.get("data-stat", th.text.strip()))
+        # Use the last header row (some tables have two header rows)
+        header_rows = thead.find_all("tr")
+        last_header_row = header_rows[-1]
+        for th in last_header_row.find_all("th"):
+            headers.append(th.get("data-stat", "").strip())
 
     tbody = table.find("tbody")
     if not tbody:
         return players
 
     for row in tbody.find_all("tr"):
-        if "class" in row.attrs and "thead" in row["class"]:
+        # Skip separator/header rows inside tbody
+        if "class" in row.attrs and "thead" in row.attrs["class"]:
             continue
         if not row.find("td"):
             continue
+
         cells = row.find_all(["th", "td"])
-        player = {"team": team_name}
+        player = {"team": team_name.replace("Score ", "")}
         for i, cell in enumerate(cells):
             key = headers[i] if i < len(headers) else f"col_{i}"
+            if not key:
+                continue
             player[key] = cell.text.strip()
-        name = player.get("player") or player.get("name_display", "")
-        if name and name.lower() not in ("reserves", "team totals", ""):
-            players.append(player)
+
+        name = player.get("player", "")
+        if not name or name.lower() in ("reserves", "team totals", ""):
+            continue
+
+        players.append(player)
 
     return players
 
@@ -120,6 +135,77 @@ def save_csv(data, filename):
     print(f"CSV saved -> {filename}")
 
 
+# ── Analysis ──────────────────────────────────────────────────────────────────
+
+def analyze(rows):
+    # Group by team
+    teams = {}
+    for row in rows:
+        team = row.get("team", "Unknown")
+        teams.setdefault(team, []).append(row)
+
+    team_stats = {}
+    for team, players in teams.items():
+        total_tov = 0
+        total_fg  = 0
+        total_fga = 0
+        for p in players:
+            try: total_tov += int(p.get("tov", 0) or 0)
+            except: pass
+            try: total_fg  += int(p.get("fg",  0) or 0)
+            except: pass
+            try: total_fga += int(p.get("fga", 0) or 0)
+            except: pass
+        fg_pct = total_fg / total_fga if total_fga else 0
+        team_stats[team] = {"tov": total_tov, "fg_pct": fg_pct}
+
+    # Score: lower turnovers + higher FG% wins
+    # Normalize: give each team a score — lower TOV rank + higher FG% rank
+    sorted_by_tov   = sorted(team_stats, key=lambda t: team_stats[t]["tov"])
+    sorted_by_fgpct = sorted(team_stats, key=lambda t: team_stats[t]["fg_pct"], reverse=True)
+
+    scores = {t: 0 for t in team_stats}
+    for rank, t in enumerate(sorted_by_tov):
+        scores[t] += rank        # lower = better
+    for rank, t in enumerate(sorted_by_fgpct):
+        scores[t] += (len(team_stats) - 1 - rank)  # higher FG% = better score
+
+    advantage_team = min(scores, key=lambda t: scores[t])
+    adv = team_stats[advantage_team]
+
+    advantage_str = (
+        f"{advantage_team} "
+        f"(TOV: {adv['tov']}, FG%: {adv['fg_pct']:.1%})"
+    )
+
+    # Best props: players with fewest TOV and best FG%
+    # Combined score: fg_pct - (tov * 0.05) — penalize turnovers
+    player_scores = []
+    for row in rows:
+        name = row.get("player", "")
+        if not name:
+            continue
+        try:
+            tov    = int(row.get("tov", 0) or 0)
+            fg     = int(row.get("fg",  0) or 0)
+            fga    = int(row.get("fga", 0) or 0)
+            fg_pct = fg / fga if fga > 0 else 0
+            score  = fg_pct - (tov * 0.05)
+            player_scores.append({
+                "player": name,
+                "team":   row.get("team", ""),
+                "tov":    tov,
+                "fg_pct": fg_pct,
+                "score":  score,
+            })
+        except:
+            continue
+
+    top_props = sorted(player_scores, key=lambda x: x["score"], reverse=True)[:3]
+
+    return advantage_str, top_props
+
+
 # ── Save HTML from CSV ────────────────────────────────────────────────────────
 
 def save_html_from_csv(csv_file, html_file):
@@ -134,10 +220,12 @@ def save_html_from_csv(csv_file, html_file):
         print("CSV is empty, skipping HTML.")
         return
 
+    advantage_str, top_props = analyze(rows)
+
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
     th_cells = "".join(f"<th>{h}</th>" for h in headers)
 
-    # Group by team
+    # Group by team, split starters/bench by mp (starters played more)
     teams = {}
     for row in rows:
         team = row.get("team", "Unknown")
@@ -145,10 +233,21 @@ def save_html_from_csv(csv_file, html_file):
 
     body = ""
     for team, players in teams.items():
-        body += f'<tr><td colspan="{len(headers)}" style="background:#ddd;font-weight:bold;padding:6px 8px;">{team}</td></tr>\n'
+        body += f'<tr class="team-header"><td colspan="{len(headers)}">{team}</td></tr>\n'
         for row in players:
             td_cells = "".join(f"<td>{row.get(h, '')}</td>" for h in headers)
             body += f"<tr>{td_cells}</tr>\n"
+
+    props_rows = ""
+    for p in top_props:
+        props_rows += (
+            f"<tr>"
+            f"<td>{p['player']}</td>"
+            f"<td>{p['team']}</td>"
+            f"<td>{p['fg_pct']:.1%}</td>"
+            f"<td>{p['tov']}</td>"
+            f"</tr>\n"
+        )
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -157,30 +256,40 @@ def save_html_from_csv(csv_file, html_file):
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>2026 NCAA Championship Boxscore</title>
 <style>
-  body {{
-    font-family: Arial, sans-serif;
-    font-size: 13px;
-    padding: 10px;
-    background: #fff;
-    color: #000;
-  }}
-  h2 {{ margin: 0 0 4px 0; }}
-  p  {{ margin: 0 0 10px 0; color: #555; font-size: 11px; }}
-  table {{ border-collapse: collapse; width: 100%; }}
-  th, td {{
-    border: 1px solid #ccc;
-    padding: 5px 8px;
-    text-align: left;
-    white-space: nowrap;
-  }}
+  body {{ font-family: Arial, sans-serif; font-size: 13px; padding: 10px; background: #fff; color: #000; }}
+  h2   {{ margin: 0 0 4px 0; }}
+  h3   {{ margin: 16px 0 6px 0; font-size: 14px; }}
+  p    {{ margin: 0 0 10px 0; color: #555; font-size: 11px; }}
+  table {{ border-collapse: collapse; width: 100%; margin-bottom: 24px; }}
+  th, td {{ border: 1px solid #ccc; padding: 5px 8px; text-align: left; white-space: nowrap; }}
   th {{ background: #f0f0f0; font-weight: bold; }}
   tr:nth-child(even) {{ background: #f9f9f9; }}
   tr:hover {{ background: #fffbcc; }}
+  tr.team-header td {{ background: #002d62; color: #fff; font-weight: bold; font-size: 14px; padding: 8px; }}
+  .advantage {{ background: #e8f5e9; border: 1px solid #a5d6a7; padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; font-size: 14px; }}
+  .advantage strong {{ color: #1b5e20; }}
+  .props {{ background: #fff8e1; border: 1px solid #ffe082; padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; }}
+  .props h3 {{ margin: 0 0 8px 0; color: #e65100; }}
 </style>
 </head>
 <body>
 <h2>2026 NCAA Championship — Michigan vs UConn</h2>
 <p>Last updated: {now} · Re-run script to refresh</p>
+
+<div class="advantage">
+  <strong>Advantage: {advantage_str}</strong><br>
+  Based on fewest turnovers and highest field goal percentage.
+</div>
+
+<div class="props">
+  <h3>Possible Props — Best Combined FG% &amp; Fewest Turnovers</h3>
+  <table>
+    <thead><tr><th>Player</th><th>Team</th><th>FG%</th><th>TOV</th></tr></thead>
+    <tbody>{props_rows}</tbody>
+  </table>
+</div>
+
+<h3>Full Box Score</h3>
 <div style="overflow-x:auto">
 <table>
   <thead><tr>{th_cells}</tr></thead>
@@ -206,7 +315,8 @@ def push_to_github():
     except subprocess.CalledProcessError as e:
         print(f"Git push failed: {e}")
 
-# ── Job ──────────────────────────────────────────────────────────────────────
+
+# ── Job ───────────────────────────────────────────────────────────────────────
 
 def job():
     players = get_boxscore(BOXSCORE_URL)
@@ -216,6 +326,7 @@ def job():
         push_to_github()
     else:
         print("No data found.")
+
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
