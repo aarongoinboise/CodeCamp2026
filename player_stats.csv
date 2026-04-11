@@ -1,15 +1,18 @@
-Player,#,Class,Pos,Height,Weight,Hometown,High School,RSCI Top 100,Summary
-Hunter Dickinson,1,SR,C,7-1,255,"Alexandria, VA",DeMatha Catholic HS,37 (2020),"17.9 Pts, 10.9 Reb, 2.3 Ast"
-Kevin McCullar,15,SR,G,6-6,205,"San Antonio, TX",Wagner HS,,"18.3 Pts, 6.0 Reb, 4.1 Ast"
-KJ Adams,24,JR,F,6-7,225,"Austin, TX",Westlake HS,66 (2021),"12.6 Pts, 4.6 Reb, 3.1 Ast"
-Johnny Furphy,10,FR,G,6-9,202,"Melbourne, Australia",Centre of Excellence (Australia),,"9.0 Pts, 4.9 Reb, 1.0 Ast"
-Dajuan Harris,3,SR,G,6-1,160,"Columbia, MO",Rock Bridge HS,,"8.5 Pts, 2.0 Reb, 6.5 Ast"
-Nicolas Timberlake,25,SR,G,6-4,200,"Braintree, MA",Kimball Union HS,,"5.2 Pts, 1.9 Reb, 0.6 Ast"
-Elmarko Jackson,13,FR,G,6-3,195,"Marlton, NJ",St. Augustine Prep (NJ); Academy of the New Church (PA); South Kent School (CT),20 (2023),"4.3 Pts, 1.4 Reb, 1.7 Ast"
-Parker Braun,23,SR,F,6-8,217,"Overland Park, KS",Blue Valley Northwest HS,,"2.2 Pts, 1.6 Reb, 0.3 Ast"
-Jamari McDowell,11,FR,G,6-4,180,"Houston, TX",Manvel (TX),,"1.8 Pts, 1.2 Reb, 0.5 Ast"
-Michael Jankovich,20,SR,G,6-5,185,"Dallas, TX",Northfield Mount Hermon School (MA),,"1.6 Pts, 0.3 Reb, 0.0 Ast"
-Wilder Evers,12,SO,G,6-3,190,"Birmingham, AL",Oak Mountain (AL),,"0.8 Pts, 0.4 Reb, 0.3 Ast"
-Patrick Cassidy,14,JR,G,6-1,185,"Columbus, KS",Columbus Unified (KS),,"0.8 Pts, 0.5 Reb, 0.0 Ast"
-Dillon Wilhite,22,SO,F,6-9,240,"San Diego, CA",Cathedral Catholic HS,,"0.3 Pts, 0.2 Reb, 0.0 Ast"
-Chris Carter,5,FR,G,6-4,190,"Indio, CA",Shadow Hills (CA),,"0.0 Pts, 0.0 Reb, 0.0 Ast"
+team,header_tmp,player,mp,fg,fga,fg_pct,fg2,fg2a,fg2_pct,fg3,fg3a,fg3_pct,ft,fta,ft_pct,orb,drb,trb,ast,stl,blk,tov,pf
+Score Connecticut,40,5,14,.357,2,4,.500,3,10,.300,4,6,.667,3,8,11,2,2,0,1,1,17,14.9
+Score Connecticut,36,4,17,.235,1,7,.143,3,10,.300,0,0,,3,4,7,2,0,1,1,2,11,4.3
+Score Connecticut,34,4,12,.333,4,11,.364,0,1,.000,5,6,.833,7,7,14,0,1,0,3,3,13,9.6
+Score Connecticut,21,1,4,.250,1,3,.333,0,1,.000,0,0,,2,0,2,2,0,1,1,5,2,0.1
+Score Connecticut,17,4,10,.400,1,3,.333,3,7,.429,0,0,,0,0,0,0,0,0,1,4,11,3.0
+Score Connecticut,20,3,6,.500,3,4,.750,0,2,.000,0,0,,2,1,3,3,1,0,1,2,6,6.0
+Score Connecticut,19,0,2,.000,0,1,.000,0,1,.000,3,4,.750,2,2,4,0,0,0,1,2,3,1.4
+Score Connecticut,9,0,3,.000,0,2,.000,0,1,.000,0,0,,1,1,2,0,0,0,0,3,0,-2.3
+Score Connecticut,6,0,0,,0,0,,0,0,,0,0,,0,0,0,0,0,0,1,0,0,-1.0
+Score Michigan,36,4,13,.308,4,8,.500,0,5,.000,5,5,1.000,1,1,2,1,0,1,1,3,13,5.7
+Score Michigan,30,4,7,.571,4,7,.571,0,0,,0,0,,0,4,4,1,1,1,2,1,8,5.9
+Score Michigan,30,5,11,.455,4,7,.571,1,4,.250,8,9,.889,0,3,3,2,2,0,1,3,19,15.0
+Score Michigan,28,5,7,.714,5,7,.714,0,0,,2,2,1.000,5,5,10,0,1,2,3,4,12,11.9
+Score Michigan,16,0,3,.000,0,1,.000,0,2,.000,4,4,1.000,1,3,4,0,2,0,1,0,4,4.5
+Score Michigan,29,2,9,.222,1,5,.200,1,4,.250,4,4,1.000,0,8,8,1,0,0,0,0,9,6.6
+Score Michigan,25,1,4,.250,1,4,.250,0,0,,2,4,.500,3,1,4,2,0,2,2,2,4,3.2
+Score Michigan,6,0,1,.000,0,1,.000,0,0,,0,0,,0,1,1,0,0,0,0,0,0,-0.4
