@@ -9,6 +9,12 @@ import asyncio
 import argparse
 import random
 from datetime import datetime
+import requests
+import schedule
+from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
+import time
+import subprocess
 
 URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
 CSV_FILE  = "boxscore.csv"
@@ -17,7 +23,6 @@ HTML_FILE = "boxscore.html"
 # ── Part A: Naive — gets blocked ─────────────────────────────────────────────
 
 def naive_scrape():
-    import requests
 
     print(f"\n  URL: {URL}")
     print("  No headers. No browser. No JavaScript execution.\n")
@@ -36,7 +41,6 @@ def naive_scrape():
         print("\n      Run with --evade to see how Playwright gets through.\n")
         return
 
-    from bs4 import BeautifulSoup
     soup = BeautifulSoup(response.text, "html.parser")
     tables = soup.find_all("table")
     print(f"  Tables found : {len(tables)}")
@@ -48,7 +52,6 @@ def naive_scrape():
 # ── Part B: Playwright — real browser, real data ──────────────────────────────
 
 async def evade_and_scrape():
-    from playwright.async_api import async_playwright
 
     print(f"\n  URL: {URL}")
     print("  Launching Chromium with stealth settings...\n")
@@ -202,9 +205,16 @@ def analyze(rows):
     for rank, t in enumerate(sorted_fgpct):
         scores[t] += (len(team_stats) - 1 - rank)
 
-    advantage_team = min(scores, key=lambda t: scores[t])
-    adv = team_stats[advantage_team]
-    advantage_str = f"{advantage_team} (TOV: {adv['tov']}, FG%: {adv['fg_pct']:.1%})"
+    t1, t2 = list(team_stats.keys())
+    if team_stats[t1]["tov"] == team_stats[t2]["tov"] and team_stats[t1]["fg_pct"] == team_stats[t2]["fg_pct"]:
+        advantage_str = "Even — no clear advantage"
+    else:
+        advantage_team = min(
+            team_stats,
+            key=lambda t: (team_stats[t]["tov"], -team_stats[t]["fg_pct"])
+        )
+        adv = team_stats[advantage_team]
+        advantage_str = f"{advantage_team} (TOV: {adv['tov']}, FG%: {adv['fg_pct']:.1%})"
 
     # Top 3 props: best FG% with fewest turnovers
     player_scores = []
@@ -229,7 +239,7 @@ def analyze(rows):
             continue
 
     top_props = sorted(player_scores, key=lambda x: x["score"], reverse=True)[:3]
-    return advantage_str, top_props
+    return advantage_str, top_props, team_stats
 
 
 # ── Output helpers ────────────────────────────────────────────────────────────
@@ -246,7 +256,12 @@ def save_html(rows, headers, filename):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     th_cells = "".join(f"<th>{h}</th>" for h in headers)
 
-    advantage_str, top_props = analyze(rows)
+    advantage_str, top_props, team_stats = analyze(rows)
+    team_stats_rows = ""
+    for team, stats in team_stats.items():
+        team_stats_rows += (
+            f"<tr><td>{team}</td><td>{stats['tov']}</td><td>{stats['fg_pct']:.1%}</td></tr>\n"
+        )
 
     props_rows = ""
     for p in top_props:
@@ -308,6 +323,14 @@ def save_html(rows, headers, filename):
 </div>
 
 <div class="props">
+  <h3>Team Totals</h3>
+  <table>
+    <thead><tr><th>Team</th><th>Turnovers</th><th>FG%</th></tr></thead>
+    <tbody>{team_stats_rows}</tbody>
+  </table>
+</div>
+
+<div class="props">
   <h3>Possible Props — Best FG% &amp; Fewest Turnovers</h3>
   <table>
     <thead><tr><th>Player</th><th>Team</th><th>FG%</th><th>TOV</th></tr></thead>
@@ -329,13 +352,29 @@ def save_html(rows, headers, filename):
         f.write(html)
     print(f"  ✓  HTML saved → '{filename}'")
 
+# ── Push to GitHub ────────────────────────────────────────────────────────────
+
+def push_to_github():
+    try:
+        subprocess.run(["git", "add", "boxscore.html", "boxscore.csv"], check=True)
+        subprocess.run(["git", "commit", "-m", f"refresh {datetime.now().strftime('%Y-%m-%d %H:%M')}"], check=True)
+        subprocess.run(["git", "push"], check=True)
+        print("Pushed to GitHub.")
+    except subprocess.CalledProcessError as e:
+        print(f"Git push failed: {e}")
+
 
 # ── Entry point ───────────────────────────────────────────────────────────────
+
+async def job():
+    await evade_and_scrape()
+    push_to_github()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--blocked", action="store_true", help="Naive scraper (gets blocked)")
     parser.add_argument("--evade",   action="store_true", help="Playwright scraper (works)")
+    parser.add_argument("--schedule", action="store_true", help="Run every 5 minutes")
     args = parser.parse_args()
 
     if args.blocked:
@@ -348,9 +387,21 @@ if __name__ == "__main__":
         print("=" * 58)
         print("  DEMO 2B — Playwright with stealth")
         print("=" * 58)
-        asyncio.run(evade_and_scrape())
+        asyncio.run(job())
+
+    elif args.schedule:
+        print("=" * 58)
+        print("  DEMO 2B — Running on schedule (every 5 min)")
+        print("=" * 58)
+        asyncio.run(job())
+        schedule.every(5).minutes.do(lambda: asyncio.run(job()))
+        print("Running every 5 minutes. Press CTRL+C to stop.")
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
 
     else:
         print("Usage:")
         print("  python demo2_evasion.py --blocked")
         print("  python demo2_evasion.py --evade")
+        print("  python demo2_evasion.py --schedule")

@@ -16,6 +16,7 @@ import subprocess
 from datetime import datetime
 import schedule
 import time
+import argparse
 
 # ── Config ────────────────────────────────────────────────────────────────────
 BOXSCORE_URL = "https://www.sports-reference.com/cbb/boxscores/2026-04-06-20-michigan.html"
@@ -170,13 +171,16 @@ def analyze(rows):
     for rank, t in enumerate(sorted_by_fgpct):
         scores[t] += (len(team_stats) - 1 - rank)  # higher FG% = better score
 
-    advantage_team = min(scores, key=lambda t: scores[t])
-    adv = team_stats[advantage_team]
-
-    advantage_str = (
-        f"{advantage_team} "
-        f"(TOV: {adv['tov']}, FG%: {adv['fg_pct']:.1%})"
-    )
+    t1, t2 = list(team_stats.keys())
+    if team_stats[t1]["tov"] == team_stats[t2]["tov"] and team_stats[t1]["fg_pct"] == team_stats[t2]["fg_pct"]:
+        advantage_str = "Even — no clear advantage"
+    else:
+        advantage_team = min(
+            team_stats,
+            key=lambda t: (team_stats[t]["tov"], -team_stats[t]["fg_pct"])
+        )
+        adv = team_stats[advantage_team]
+        advantage_str = f"{advantage_team} (TOV: {adv['tov']}, FG%: {adv['fg_pct']:.1%})"
 
     # Best props: players with fewest TOV and best FG%
     # Combined score: fg_pct - (tov * 0.05) — penalize turnovers
@@ -203,7 +207,7 @@ def analyze(rows):
 
     top_props = sorted(player_scores, key=lambda x: x["score"], reverse=True)[:3]
 
-    return advantage_str, top_props
+    return advantage_str, top_props, team_stats
 
 
 # ── Save HTML from CSV ────────────────────────────────────────────────────────
@@ -220,7 +224,12 @@ def save_html_from_csv(csv_file, html_file):
         print("CSV is empty, skipping HTML.")
         return
 
-    advantage_str, top_props = analyze(rows)
+    advantage_str, top_props, team_stats = analyze(rows)
+    team_stats_rows = ""
+    for team, stats in team_stats.items():
+        team_stats_rows += (
+            f"<tr><td>{team}</td><td>{stats['tov']}</td><td>{stats['fg_pct']:.1%}</td></tr>\n"
+        )
 
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
     th_cells = "".join(f"<th>{h}</th>" for h in headers)
@@ -282,6 +291,14 @@ def save_html_from_csv(csv_file, html_file):
 </div>
 
 <div class="props">
+  <h3>Team Totals</h3>
+  <table>
+    <thead><tr><th>Team</th><th>Turnovers</th><th>FG%</th></tr></thead>
+    <tbody>{team_stats_rows}</tbody>
+  </table>
+</div>
+
+<div class="props">
   <h3>Possible Props — Best Combined FG% &amp; Fewest Turnovers</h3>
   <table>
     <thead><tr><th>Player</th><th>Team</th><th>FG%</th><th>TOV</th></tr></thead>
@@ -331,9 +348,15 @@ def job():
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--schedule", action="store_true", help="Run every 5 minutes")
+    args = parser.parse_args()
+
     job()
-    schedule.every(5).minutes.do(job)
-    print("Running every 5 minutes. Press CTRL+C to stop.")
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
+
+    if args.schedule:
+        schedule.every(5).minutes.do(job)
+        print("Running every 5 minutes. Press CTRL+C to stop.")
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
