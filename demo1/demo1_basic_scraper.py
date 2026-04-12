@@ -46,34 +46,24 @@ def get_boxscore(url):
     soup = BeautifulSoup(response.text, "html.parser")
     all_players = []
 
-    # SR buries tables in HTML comments — parse them out
-    from bs4 import Comment
-    comments = soup.find_all(string=lambda t: isinstance(t, Comment))
-
     tables_found = []
-    for comment in comments:
-        comment_soup = BeautifulSoup(comment, "html.parser")
-        for table in comment_soup.find_all("table"):
-            tid = table.get("id", "")
-            if "basic" in tid and "box" in tid:
-                tables_found.append((tid, table))
-
-    # Fallback: visible tables
-    if not tables_found:
-        for table in soup.find_all("table"):
-            tid = table.get("id", "")
-            if "basic" in tid and "box" in tid:
-                tables_found.append((tid, table))
+    # Find tables
+    for table in soup.find_all("table"):
+        tid = table.get("id", "")
+        if "basic" in tid and "box" in tid:
+            tables_found.append((tid, table))
 
     for tid, table in tables_found:
-        # table id format: "box-connecticut-game-basic" or "box-michigan-game-basic"
+        print(tid)
         team_name = (
-            tid.replace("box-", "")
+            tid.replace("box", "") # replace unneeded title information from tables
+               .replace("-score", "")
                .replace("-game-basic", "")
                .replace("-basic", "")
-               .replace("-", " ")
+               .replace("-", "")
                .title()
         )
+        print(team_name)
         players = parse_table(table, team_name)
         all_players.extend(players)
 
@@ -82,12 +72,9 @@ def get_boxscore(url):
 
 def parse_table(table, team_name):
     players = []
-
-    # Get headers from data-stat attributes — these are the clean column keys
     headers = []
     thead = table.find("thead")
     if thead:
-        # Use the last header row (some tables have two header rows)
         header_rows = thead.find_all("tr")
         last_header_row = header_rows[-1]
         for th in last_header_row.find_all("th"):
@@ -98,14 +85,13 @@ def parse_table(table, team_name):
         return players
 
     for row in tbody.find_all("tr"):
-        # Skip separator/header rows inside tbody
         if "class" in row.attrs and "thead" in row.attrs["class"]:
             continue
         if not row.find("td"):
             continue
 
         cells = row.find_all(["th", "td"])
-        player = {"team": team_name.replace("Score ", "")}
+        player = {"team": team_name}
         for i, cell in enumerate(cells):
             key = headers[i] if i < len(headers) else f"col_{i}"
             if not key:
@@ -161,7 +147,6 @@ def analyze(rows):
         team_stats[team] = {"tov": total_tov, "fg_pct": fg_pct}
 
     # Score: lower turnovers + higher FG% wins
-    # Normalize: give each team a score — lower TOV rank + higher FG% rank
     sorted_by_tov   = sorted(team_stats, key=lambda t: team_stats[t]["tov"])
     sorted_by_fgpct = sorted(team_stats, key=lambda t: team_stats[t]["fg_pct"], reverse=True)
 
