@@ -1,34 +1,35 @@
+import demo4
 import asyncio
 import argparse
 import schedule
 import time
-import demo4
+
+SITES = {
+    "sports-ref": {
+        "name": "Sports Reference",
+        "url": "https://www.sports-reference.com/cbb/boxscores/2026-04-06-20-michigan.html",
+    },
+    "espn": {
+        "name": "ESPN Box Score",
+        "url": "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600",
+    },
+}
 
 # ─────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────
 
-async def main():
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--site", choices=["sports-ref", "espn", "both"], default="both")
+    parser.add_argument("--sites", nargs="+", choices=list(SITES.keys()), default=list(SITES.keys()))
     parser.add_argument("--schedule", action="store_true")
     args = parser.parse_args()
 
-    sites = ["sports-ref", "espn"] if args.site == "both" else [args.site]
-
-    await demo4.run_job(sites)
+    asyncio.run(demo4.run_job(args.sites))
 
     if args.schedule:
-        def job():
-            asyncio.run(demo4.run_job(sites))
-
-        schedule.every(5).minutes.do(job)
-
-        print("Running every 5 minutes")
+        schedule.every(5).minutes.do(lambda: asyncio.run(demo4.run_job(args.sites)))
+        print("Running every 5 minutes. Press CTRL+C to stop.")
         while True:
             schedule.run_pending()
             time.sleep(1)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

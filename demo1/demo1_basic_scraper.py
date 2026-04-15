@@ -1,27 +1,15 @@
-"""
-Scrapes a specific game boxscore from sports-reference.com
-→ saves CSV → saves a plain HTML table → pushes to GitHub
-
-INSTALL:
-  pip install requests beautifulsoup4
-
-RUN:
-  python demo1_basic_scraper.py
-"""
-
 import requests
 from bs4 import BeautifulSoup
-import csv
-import subprocess
 from datetime import datetime
 import schedule
 import time
 import argparse
+import os
+import smtplib
+from email.mime.text import MIMEText
 
 # ── Config ────────────────────────────────────────────────────────────────────
 BOXSCORE_URL = "https://www.sports-reference.com/cbb/boxscores/2026-04-06-20-michigan.html"
-OUTPUT_CSV   = "player_stats.csv"
-OUTPUT_HTML  = "dashboard.html"
 
 HEADERS = {
     "User-Agent": (
@@ -47,7 +35,6 @@ def get_boxscore(url):
     all_players = []
 
     tables_found = []
-    # Find tables
     for table in soup.find_all("table"):
         tid = table.get("id", "")
         if "basic" in tid and "box" in tid:
@@ -56,7 +43,7 @@ def get_boxscore(url):
     for tid, table in tables_found:
         print(tid)
         team_name = (
-            tid.replace("box", "") # replace unneeded title information from tables
+            tid.replace("box", "")
                .replace("-score", "")
                .replace("-game-basic", "")
                .replace("-basic", "")
@@ -107,25 +94,9 @@ def parse_table(table, team_name):
     return players
 
 
-# ── Save CSV ──────────────────────────────────────────────────────────────────
-
-def save_csv(data, filename):
-    if not data:
-        print("No data to save.")
-        return
-    clean = [{k: v for k, v in row.items() if k} for row in data]
-    all_keys = list(clean[0].keys())
-    with open(filename, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=all_keys, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(clean)
-    print(f"CSV saved -> {filename}")
-
-
 # ── Analysis ──────────────────────────────────────────────────────────────────
 
 def analyze(rows):
-    # Group by team
     teams = {}
     for row in rows:
         team = row.get("team", "Unknown")
@@ -146,15 +117,14 @@ def analyze(rows):
         fg_pct = total_fg / total_fga if total_fga else 0
         team_stats[team] = {"tov": total_tov, "fg_pct": fg_pct}
 
-    # Score: lower turnovers + higher FG% wins
     sorted_by_tov   = sorted(team_stats, key=lambda t: team_stats[t]["tov"])
     sorted_by_fgpct = sorted(team_stats, key=lambda t: team_stats[t]["fg_pct"], reverse=True)
 
     scores = {t: 0 for t in team_stats}
     for rank, t in enumerate(sorted_by_tov):
-        scores[t] += rank        # lower = better
+        scores[t] += rank
     for rank, t in enumerate(sorted_by_fgpct):
-        scores[t] += (len(team_stats) - 1 - rank)  # higher FG% = better score
+        scores[t] += (len(team_stats) - 1 - rank)
 
     t1, t2 = list(team_stats.keys())
     if team_stats[t1]["tov"] == team_stats[t2]["tov"] and team_stats[t1]["fg_pct"] == team_stats[t2]["fg_pct"]:
@@ -167,8 +137,6 @@ def analyze(rows):
         adv = team_stats[advantage_team]
         advantage_str = f"{advantage_team} (TOV: {adv['tov']}, FG%: {adv['fg_pct']:.1%})"
 
-    # Best props: players with fewest TOV and best FG%
-    # Combined score: fg_pct - (tov * 0.05) — penalize turnovers
     player_scores = []
     for row in rows:
         name = row.get("player", "")
@@ -195,127 +163,36 @@ def analyze(rows):
     return advantage_str, top_props, team_stats
 
 
-# ── Save HTML from CSV ────────────────────────────────────────────────────────
+# ── Send Email ────────────────────────────────────────────────────────────────
 
-def save_html_from_csv(csv_file, html_file):
-    rows = []
-    with open(csv_file, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        headers = reader.fieldnames or []
-        for row in reader:
-            rows.append(row)
-
-    if not rows:
-        print("CSV is empty, skipping HTML.")
-        return
-
-    advantage_str, top_props, team_stats = analyze(rows)
-    team_stats_rows = ""
-    for team, stats in team_stats.items():
-        team_stats_rows += (
-            f"<tr><td>{team}</td><td>{stats['tov']}</td><td>{stats['fg_pct']:.1%}</td></tr>\n"
-        )
-
+def send_email(advantage_str, top_props, team_stats):
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
-    th_cells = "".join(f"<th>{h}</th>" for h in headers)
 
-    # Group by team, split starters/bench by mp (starters played more)
-    teams = {}
-    for row in rows:
-        team = row.get("team", "Unknown")
-        teams.setdefault(team, []).append(row)
+    body = f"2026 NCAA Championship — Michigan vs UConn\nLast updated: {now}\n"
+    body += "=" * 40 + "\n\n"
 
-    body = ""
-    for team, players in teams.items():
-        body += f'<tr class="team-header"><td colspan="{len(headers)}">{team}</td></tr>\n'
-        for row in players:
-            td_cells = "".join(f"<td>{row.get(h, '')}</td>" for h in headers)
-            body += f"<tr>{td_cells}</tr>\n"
+    body += f"ADVANTAGE: {advantage_str}\n"
+    body += "Based on fewest turnovers and highest field goal percentage.\n\n"
 
-    props_rows = ""
+    body += "TEAM TOTALS\n"
+    body += "-" * 30 + "\n"
+    for team, stats in team_stats.items():
+        body += f"{team}: TOV: {stats['tov']}  FG%: {stats['fg_pct']:.1%}\n"
+
+    body += "\nTOP PROPS — Best FG% & Fewest Turnovers\n"
+    body += "-" * 30 + "\n"
     for p in top_props:
-        props_rows += (
-            f"<tr>"
-            f"<td>{p['player']}</td>"
-            f"<td>{p['team']}</td>"
-            f"<td>{p['fg_pct']:.1%}</td>"
-            f"<td>{p['tov']}</td>"
-            f"</tr>\n"
-        )
+        body += f"{p['player']} ({p['team']})  FG%: {p['fg_pct']:.1%}  TOV: {p['tov']}\n"
 
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>2026 NCAA Championship Boxscore</title>
-<style>
-  body {{ font-family: Arial, sans-serif; font-size: 13px; padding: 10px; background: #fff; color: #000; }}
-  h2   {{ margin: 0 0 4px 0; }}
-  h3   {{ margin: 16px 0 6px 0; font-size: 14px; }}
-  p    {{ margin: 0 0 10px 0; color: #555; font-size: 11px; }}
-  table {{ border-collapse: collapse; width: 100%; margin-bottom: 24px; }}
-  th, td {{ border: 1px solid #ccc; padding: 5px 8px; text-align: left; white-space: nowrap; }}
-  th {{ background: #f0f0f0; font-weight: bold; }}
-  tr:nth-child(even) {{ background: #f9f9f9; }}
-  tr:hover {{ background: #fffbcc; }}
-  tr.team-header td {{ background: #002d62; color: #fff; font-weight: bold; font-size: 14px; padding: 8px; }}
-  .advantage {{ background: #e8f5e9; border: 1px solid #a5d6a7; padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; font-size: 14px; }}
-  .advantage strong {{ color: #1b5e20; }}
-  .props {{ background: #fff8e1; border: 1px solid #ffe082; padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; }}
-  .props h3 {{ margin: 0 0 8px 0; color: #e65100; }}
-</style>
-</head>
-<body>
-<h2>2026 NCAA Championship — Michigan vs UConn</h2>
-<p>Last updated: {now} · Re-run script to refresh</p>
+    msg = MIMEText(body)
+    msg["Subject"] = f"Game Update — {now}"
+    msg["From"]    = os.environ.get("GMAIL_USER")
+    msg["To"]      = os.environ.get("GMAIL_USER")
 
-<div class="advantage">
-  <strong>Advantage: {advantage_str}</strong><br>
-  Based on fewest turnovers and highest field goal percentage.
-</div>
-
-<div class="props">
-  <h3>Team Totals</h3>
-  <table>
-    <thead><tr><th>Team</th><th>Turnovers</th><th>FG%</th></tr></thead>
-    <tbody>{team_stats_rows}</tbody>
-  </table>
-</div>
-
-<div class="props">
-  <h3>Possible Props — Best Combined FG% &amp; Fewest Turnovers</h3>
-  <table>
-    <thead><tr><th>Player</th><th>Team</th><th>FG%</th><th>TOV</th></tr></thead>
-    <tbody>{props_rows}</tbody>
-  </table>
-</div>
-
-<h3>Full Box Score</h3>
-<div style="overflow-x:auto">
-<table>
-  <thead><tr>{th_cells}</tr></thead>
-  <tbody>{body}</tbody>
-</table>
-</div>
-</body>
-</html>"""
-
-    with open(html_file, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"HTML saved -> {html_file}")
-
-
-# ── Push to GitHub ────────────────────────────────────────────────────────────
-
-def push_to_github():
-    try:
-        subprocess.run(["git", "add", "dashboard.html", "player_stats.csv"], check=True)
-        subprocess.run(["git", "commit", "-m", f"refresh {datetime.now().strftime('%Y-%m-%d %H:%M')}"], check=True)
-        subprocess.run(["git", "push"], check=True)
-        print("Pushed to GitHub.")
-    except subprocess.CalledProcessError as e:
-        print(f"Git push failed: {e}")
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(os.environ.get("GMAIL_USER"), os.environ.get("GMAIL_APP_PASSWORD"))
+        server.send_message(msg)
+    print("Email sent.")
 
 
 # ── Job ───────────────────────────────────────────────────────────────────────
@@ -323,9 +200,8 @@ def push_to_github():
 def job():
     players = get_boxscore(BOXSCORE_URL)
     if players:
-        save_csv(players, OUTPUT_CSV)
-        save_html_from_csv(OUTPUT_CSV, OUTPUT_HTML)
-        push_to_github()
+        advantage_str, top_props, team_stats = analyze(players)
+        send_email(advantage_str, top_props, team_stats)
     else:
         print("No data found.")
 

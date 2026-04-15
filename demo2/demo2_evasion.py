@@ -14,12 +14,11 @@ import demo2
 
 async def job():
     await demo2.evade_and_scrape()
-    demo2.push_to_github()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--blocked", action="store_true", help="Naive scraper (gets blocked)")
-    parser.add_argument("--evade",   action="store_true", help="Playwright scraper (works)")
+    parser.add_argument("--blocked",  action="store_true", help="Naive scraper (gets blocked)")
+    parser.add_argument("--evade",    action="store_true", help="Playwright scraper (works)")
     parser.add_argument("--schedule", action="store_true", help="Run every 5 minutes")
     args = parser.parse_args()
 

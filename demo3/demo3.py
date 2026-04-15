@@ -4,7 +4,7 @@ scraper.py — Resilient box score scraper (function library)
 Call parse_args() to get the source, then use:
   - load_html(args)        → raw HTML string
   - scrape_resilient(html) → structured dict
-  - save_csv(data, path)   → writes CSV
+  - send_email(data)       → emails stats to yourself
 
 Args (exactly one per run):
   --v1 FILE    local HTML, V1 layout (table + semantic classes)
@@ -15,22 +15,20 @@ Args (exactly one per run):
 
 from bs4 import BeautifulSoup
 import re
-import csv
 import argparse
+import asyncio
+import time
+import schedule
+import smtplib
+import os
+from email.mime.text import MIMEText
+from datetime import datetime
 
 # ── ESPN live URL ─────────────────────────────────────────────────────────────
 
 ESPN_URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
 
-# Column order ESPN always uses — position-based, never rely on class names
 COL_ORDER = ["name", "min", "pts", "fg", "3pt", "ft", "reb", "ast", "to", "stl", "blk"]
-
-CSV_FIELDS = [
-    "team", "player", "starter",
-    "MIN", "PTS", "FG", "3PT", "FT",
-    "REB", "AST", "TO", "STL", "BLK",
-    "OREB", "DREB", "PF",
-]
 
 
 # =============================================================================
@@ -38,18 +36,12 @@ CSV_FIELDS = [
 # =============================================================================
 
 def parse_args():
-    """
-    Parse CLI args. Enforces exactly one source flag per run.
-    Returns argparse.Namespace with attrs: v1, v2, v3, espn
-    """
     parser = argparse.ArgumentParser(description="Resilient ESPN box score scraper")
-
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--v1",   metavar="FILE", help="Local HTML, V1 layout (table + semantic classes)")
     group.add_argument("--v2",   metavar="FILE", help="Local HTML, V2 layout (table + data-* attributes)")
     group.add_argument("--v3",   metavar="FILE", help="Local HTML, V3 layout (div/span grid, no table)")
     group.add_argument("--espn", action="store_true", help="Fetch live from ESPN via requests")
-
     return parser.parse_args()
 
 
@@ -58,12 +50,6 @@ def parse_args():
 # =============================================================================
 
 def load_html(args) -> str:
-    """
-    Load raw HTML from the source indicated by parsed args.
-    --v1/v2/v3: reads the given local file path.
-    --espn:     fetches the live ESPN page with a browser User-Agent.
-    Returns the raw HTML string.
-    """
     if args.espn:
         import requests
         headers = {
@@ -77,28 +63,21 @@ def load_html(args) -> str:
         resp.raise_for_status()
         return resp.text
 
-    # --v1, --v2, --v3 all point to a local file path
     path = args.v1 or args.v2 or args.v3
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
 
 
 # =============================================================================
-# PARSING — resilient, position-based, layout-agnostic
+# PARSING
 # =============================================================================
 
 def looks_like_stat_row(cells):
-    """True if the row has at least 2 shot-attempt patterns like '5-11'."""
     attempts = sum(1 for c in cells if re.match(r"^\d{1,2}-\d{1,2}$", c.strip()))
     return attempts >= 2
 
 
 def extract_score(soup):
-    """
-    Find the final score by locating prominent numeric text nodes
-    outside of table cells (scores live in headers, not stat rows).
-    Returns [score1, score2] as strings, highest first.
-    """
     candidates = []
     for el in soup.find_all(string=re.compile(r"^\d{2,3}$")):
         text = el.strip()
@@ -106,7 +85,7 @@ def extract_score(soup):
         if parent_tag not in ("td", "th", "li", "script", "style"):
             try:
                 val = int(text)
-                if 40 <= val <= 200:  # realistic finished-game score range
+                if 40 <= val <= 200:
                     candidates.append((val, el))
             except ValueError:
                 pass
@@ -117,17 +96,13 @@ def extract_score(soup):
 
 
 def extract_team_names(soup):
-    """
-    Pull team names across all 3 local HTML layouts and live ESPN.
-    Tries progressively broader selectors; returns up to 2 names.
-    """
     names = []
     selectors = [
-        ("span", re.compile(r"^team.?name$",           re.I)),  # V1
-        ("span", re.compile(r"ScoreHeader__TeamName",  re.I)),  # V2
-        ("span", re.compile(r"^long.?name$",           re.I)),  # V3
-        ("div",  re.compile(r"ScoreCell__TeamName|teamName", re.I)),  # live ESPN
-        ("span", re.compile(r"ScoreCell__TeamName|teamName", re.I)),  # live ESPN alt
+        ("span", re.compile(r"^team.?name$",           re.I)),
+        ("span", re.compile(r"ScoreHeader__TeamName",  re.I)),
+        ("span", re.compile(r"^long.?name$",           re.I)),
+        ("div",  re.compile(r"ScoreCell__TeamName|teamName", re.I)),
+        ("span", re.compile(r"ScoreCell__TeamName|teamName", re.I)),
     ]
     for tag, cls in selectors:
         for el in soup.find_all(tag, class_=cls):
@@ -140,19 +115,9 @@ def extract_team_names(soup):
 
 
 def extract_players(soup):
-    """
-    Extract player rows regardless of table vs div/span layout.
-    Uses column position for stat identity — ESPN column order is always:
-      name, min, pts, fg, 3pt, ft, reb, ast, to, stl, blk
-
-    Returns:
-      players: list of dicts for individual players
-      totals:  list of dicts for TEAM total rows
-    """
     players = []
     totals  = []
 
-    # Candidates from both table-based and div-based layouts
     row_candidates = soup.find_all("tr") + soup.find_all(
         "div", class_=re.compile(r"(row|athlete)", re.I)
     )
@@ -168,14 +133,12 @@ def extract_players(soup):
             continue
         if not looks_like_stat_row(cells):
             continue
-        # Skip header rows
         if cells[0].upper() in ("STARTERS", "BENCH", "MIN", "PLAYER"):
             continue
 
         row_classes = " ".join(row.get("class", []))
         is_starter  = "bench" not in row_classes.lower()
 
-        # Team totals row
         if cells[0].upper() in ("TEAM", "TOTALS"):
             row_data = {col: (cells[i] if i < len(cells) else None)
                         for i, col in enumerate(COL_ORDER)}
@@ -192,15 +155,6 @@ def extract_players(soup):
 
 
 def scrape_resilient(html: str) -> dict:
-    """
-    Main scrape entry point. Parses raw HTML and returns:
-      {
-        "scores":     [score1, score2],
-        "team_names": [team1, team2],
-        "players":    [...],
-        "totals":     [...],
-      }
-    """
     soup = BeautifulSoup(html, "html.parser")
     players, totals = extract_players(soup)
     return {
@@ -212,52 +166,125 @@ def scrape_resilient(html: str) -> dict:
 
 
 # =============================================================================
-# CSV OUTPUT
+# ANALYSIS
 # =============================================================================
 
-def save_csv(data: dict, out_path: str):
-    """
-    Write player rows to CSV with columns:
-      team, player, starter, MIN, PTS, FG, 3PT, FT,
-      REB, AST, TO, STL, BLK, OREB, DREB, PF
-
-    Team assignment: the player list is split in half — first half gets
-    team_names[0], second half gets team_names[1]. ESPN always lists one
-    full team then the other.
-
-    OREB, DREB, PF are left blank when not present in the source HTML.
-    """
+def analyze(data: dict):
     players    = data["players"]
     team_names = data.get("team_names", [])
-
-    mid = len(players) // 2
+    mid        = len(players) // 2
 
     def get_team(idx):
         if len(team_names) == 2:
             return team_names[0] if idx < mid else team_names[1]
         if len(team_names) == 1:
             return team_names[0]
-        return ""
+        return "Unknown"
 
-    with open(out_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
-        writer.writeheader()
-        for i, p in enumerate(players):
-            writer.writerow({
-                "team":    get_team(i),
-                "player":  p.get("name", ""),
-                "starter": p.get("starter", ""),
-                "MIN":     p.get("min", ""),
-                "PTS":     p.get("pts", ""),
-                "FG":      p.get("fg", ""),
-                "3PT":     p.get("3pt", ""),
-                "FT":      p.get("ft", ""),
-                "REB":     p.get("reb", ""),
-                "AST":     p.get("ast", ""),
-                "TO":      p.get("to", ""),
-                "STL":     p.get("stl", ""),
-                "BLK":     p.get("blk", ""),
-                "OREB":    "",  # not in simulated HTML
-                "DREB":    "",  # not in simulated HTML
-                "PF":      "",  # not in simulated HTML
+    # Attach team to each player
+    for i, p in enumerate(players):
+        p["team"] = get_team(i)
+
+    # Team totals
+    teams = {}
+    for p in players:
+        teams.setdefault(p["team"], []).append(p)
+
+    team_stats = {}
+    for team, roster in teams.items():
+        total_tov = 0
+        total_fg  = 0
+        total_fga = 0
+        for p in roster:
+            try: total_tov += int(p.get("to", 0) or 0)
+            except: pass
+            fg_str = p.get("fg", "0-0") or "0-0"
+            try:
+                made, att = fg_str.split("-")
+                total_fg  += int(made)
+                total_fga += int(att)
+            except: pass
+        fg_pct = total_fg / total_fga if total_fga else 0
+        team_stats[team] = {"tov": total_tov, "fg_pct": fg_pct}
+
+    # Advantage
+    t1, t2 = list(team_stats.keys())
+    if team_stats[t1]["tov"] == team_stats[t2]["tov"] and team_stats[t1]["fg_pct"] == team_stats[t2]["fg_pct"]:
+        advantage_str = "Even — no clear advantage"
+    else:
+        advantage_team = min(
+            team_stats,
+            key=lambda t: (team_stats[t]["tov"], -team_stats[t]["fg_pct"])
+        )
+        adv = team_stats[advantage_team]
+        advantage_str = f"{advantage_team} (TOV: {adv['tov']}, FG%: {adv['fg_pct']:.1%})"
+
+    # Top props
+    player_scores = []
+    for p in players:
+        name = p.get("name", "")
+        if not name:
+            continue
+        try:
+            tov    = int(p.get("to", 0) or 0)
+            fg_str = p.get("fg", "0-0") or "0-0"
+            made, att = fg_str.split("-")
+            fg_pct = int(made) / int(att) if int(att) > 0 else 0
+            score  = fg_pct - (tov * 0.05)
+            player_scores.append({
+                "player": name,
+                "team":   p["team"],
+                "tov":    tov,
+                "fg_pct": fg_pct,
+                "score":  score,
             })
+        except:
+            continue
+
+    top_props = sorted(player_scores, key=lambda x: x["score"], reverse=True)[:3]
+    return advantage_str, top_props, team_stats
+
+
+# =============================================================================
+# EMAIL
+# =============================================================================
+
+def send_email(data: dict):
+    now = datetime.now().strftime("%b %d %Y %I:%M %p")
+    advantage_str, top_props, team_stats = analyze(data)
+
+    scores     = data.get("scores", [])
+    team_names = data.get("team_names", ["Team 1", "Team 2"])
+    score_line = (
+        f"{team_names[0]} {scores[0]} · {team_names[1]} {scores[1]}"
+        if len(scores) >= 2 and len(team_names) >= 2
+        else "Score unavailable"
+    )
+
+    body  = f"2026 NCAA Championship — {' vs '.join(team_names)}\n"
+    body += f"{score_line}\n"
+    body += f"Last updated: {now}\n"
+    body += "=" * 40 + "\n\n"
+
+    body += f"ADVANTAGE: {advantage_str}\n"
+    body += "Based on fewest turnovers and highest field goal percentage.\n\n"
+
+    body += "TEAM TOTALS\n"
+    body += "-" * 30 + "\n"
+    for team, stats in team_stats.items():
+        body += f"{team}: TOV: {stats['tov']}  FG%: {stats['fg_pct']:.1%}\n"
+
+    body += "\nTOP PROPS — Best FG% & Fewest Turnovers\n"
+    body += "-" * 30 + "\n"
+    for p in top_props:
+        body += f"{p['player']} ({p['team']})  FG%: {p['fg_pct']:.1%}  TOV: {p['tov']}\n"
+
+    msg = MIMEText(body)
+    msg["Subject"] = f"Game Update — {now}"
+    msg["From"]    = os.environ.get("GMAIL_USER")
+    msg["To"]      = os.environ.get("GMAIL_USER")
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(os.environ.get("GMAIL_USER"), os.environ.get("GMAIL_APP_PASSWORD"))
+        server.send_message(msg)
+    print("  ✓  Email sent.")

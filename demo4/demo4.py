@@ -1,11 +1,14 @@
 import asyncio
 import argparse
-import csv
 import schedule
 import time
+import smtplib
+import os
 import requests
 from bs4 import BeautifulSoup
 from ollama import Client
+from email.mime.text import MIMEText
+from datetime import datetime
 
 # ─────────────────────────────────────────────────────────────
 # CONFIG
@@ -31,9 +34,7 @@ MODEL = "llama3.1"
 # ─────────────────────────────────────────────────────────────
 
 def fetch_html(url: str) -> str:
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
     r = requests.get(url, headers=headers, timeout=30)
     r.raise_for_status()
     return r.text
@@ -59,40 +60,36 @@ Return JSON only.
 TEXT:
 {text[:20000]}
 """
-    res = ollama.generate(
-        model=MODEL,
-        prompt=prompt
-    )
+    res = ollama.generate(model=MODEL, prompt=prompt)
     return res["response"]
 
 
 # ─────────────────────────────────────────────────────────────
-# OUTPUT
+# EMAIL
 # ─────────────────────────────────────────────────────────────
 
-def save_csv(site_key: str, data: str):
-    filename = f"stats_{site_key}.csv"
-    with open(filename, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["raw_output"])
-        writer.writerow([data])
+def send_email(results: dict):
+    now = datetime.now().strftime("%b %d %Y %I:%M %p")
 
+    body  = f"2026 NCAA Championship — Game Update\n"
+    body += f"Last updated: {now}\n"
+    body += "=" * 40 + "\n\n"
 
-def save_html(results: dict):
-    html = """
-    <html>
-    <head><title>Dashboard</title></head>
-    <body>
-    <h1>Scraper Dashboard</h1>
-    """
+    for key, result in results.items():
+        site_name = SITES[key]["name"]
+        body += f"{site_name}\n"
+        body += "-" * 30 + "\n"
+        body += f"{result}\n\n"
 
-    for k, v in results.items():
-        html += f"<h2>{k}</h2><pre>{v}</pre>"
+    msg = MIMEText(body)
+    msg["Subject"] = f"Game Update — {now}"
+    msg["From"]    = os.environ.get("GMAIL_USER")
+    msg["To"]      = os.environ.get("GMAIL_USER")
 
-    html += "</body></html>"
-
-    with open("dashboard.html", "w", encoding="utf-8") as f:
-        f.write(html)
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(os.environ.get("GMAIL_USER"), os.environ.get("GMAIL_APP_PASSWORD"))
+        server.send_message(msg)
+    print("  ✓  Email sent.")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -105,16 +102,30 @@ async def run_job(selected_sites):
     for key in selected_sites:
         site = SITES[key]
         print(f"\nScraping {site['name']}")
-
-        html = fetch_html(site["url"])
-        text = clean_html(html)
-
+        html   = fetch_html(site["url"])
+        text   = clean_html(html)
         result = extract_with_ai(text)
-
         results[key] = result
 
-        save_csv(key, result)
-
-    save_html(results)
-
+    send_email(results)
     print("\nDONE")
+
+
+# ─────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--sites", nargs="+", choices=list(SITES.keys()), default=list(SITES.keys()))
+    parser.add_argument("--schedule", action="store_true")
+    args = parser.parse_args()
+
+    asyncio.run(run_job(args.sites))
+
+    if args.schedule:
+        schedule.every(5).minutes.do(lambda: asyncio.run(run_job(args.sites)))
+        print("Running every 5 minutes. Press CTRL+C to stop.")
+        while True:
+            schedule.run_pending()
+            time.sleep(1)

@@ -1,26 +1,27 @@
 """
 DEMO 2 — Getting Blocked → Getting Around It
 Part A: naive requests call → 403
-Part B: Playwright with stealth → box score CSV + HTML
+Part B: Playwright with stealth → sends email with stats
 """
 
-import csv
 import asyncio
 import random
+import smtplib
 from datetime import datetime
+from email.mime.text import MIMEText
+import os
 import requests
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
-import subprocess
+import argparse
+import schedule
+import time
 
 URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
-CSV_FILE  = "boxscore.csv"
-HTML_FILE = "boxscore.html"
 
 # ── Part A: Naive — gets blocked ─────────────────────────────────────────────
 
 def naive_scrape():
-
     print(f"\n  URL: {URL}")
     print("  No headers. No browser. No JavaScript execution.\n")
 
@@ -49,7 +50,6 @@ def naive_scrape():
 # ── Part B: Playwright — real browser, real data ──────────────────────────────
 
 async def evade_and_scrape():
-
     print(f"\n  URL: {URL}")
     print("  Launching Chromium with stealth settings...\n")
 
@@ -113,13 +113,6 @@ async def evade_and_scrape():
         await browser.close()
         print(f"  Browser closed. Found {len(tables)} tables.\n")
 
-        # Table 0 = score summary
-        # Table 1 = UConn player names
-        # Table 2 = UConn stats
-        # Table 3 = Michigan player names
-        # Table 4 = Michigan stats
-        # Table 5 = Big East standings
-        # Table 6 = Big Ten standings
         stat_headers = ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK", "OREB", "DREB", "PF"]
         teams = [
             ("UConn Huskies",       tables[1], tables[2]),
@@ -130,7 +123,6 @@ async def evade_and_scrape():
         for team_name, name_table, stat_table in teams:
             is_starter = True
 
-            # Clean stat rows — strip header rows, totals, and shooting pct rows
             clean_stats = []
             for row in stat_table['rows']:
                 if not row:          continue
@@ -164,9 +156,9 @@ async def evade_and_scrape():
                       f"REB={record['REB']:>3}  PF={record['PF']:>3}")
 
         print(f"\n  ✓  {len(all_rows)} players parsed")
-        headers = ["team", "player", "starter"] + stat_headers
-        save_csv(all_rows, headers, CSV_FILE)
-        save_html(all_rows, headers, HTML_FILE)
+
+        advantage_str, top_props, team_stats = analyze(all_rows)
+        send_email(advantage_str, top_props, team_stats)
 
 
 # ── Analysis ──────────────────────────────────────────────────────────────────
@@ -213,7 +205,6 @@ def analyze(rows):
         adv = team_stats[advantage_team]
         advantage_str = f"{advantage_team} (TOV: {adv['tov']}, FG%: {adv['fg_pct']:.1%})"
 
-    # Top 3 props: best FG% with fewest turnovers
     player_scores = []
     for row in rows:
         name = row.get("player", "")
@@ -239,123 +230,33 @@ def analyze(rows):
     return advantage_str, top_props, team_stats
 
 
-# ── Output helpers ────────────────────────────────────────────────────────────
+# ── Send Email ────────────────────────────────────────────────────────────────
 
-def save_csv(rows, headers, filename):
-    with open(filename, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=headers, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
-    print(f"  ✓  CSV  saved → '{filename}'")
+def send_email(advantage_str, top_props, team_stats):
+    now = datetime.now().strftime("%b %d %Y %I:%M %p")
 
+    body = f"2026 NCAA Championship — Michigan vs UConn\nLast updated: {now}\n"
+    body += "=" * 40 + "\n\n"
 
-def save_html(rows, headers, filename):
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    th_cells = "".join(f"<th>{h}</th>" for h in headers)
+    body += f"ADVANTAGE: {advantage_str}\n"
+    body += "Based on fewest turnovers and highest field goal percentage.\n\n"
 
-    advantage_str, top_props, team_stats = analyze(rows)
-    team_stats_rows = ""
+    body += "TEAM TOTALS\n"
+    body += "-" * 30 + "\n"
     for team, stats in team_stats.items():
-        team_stats_rows += (
-            f"<tr><td>{team}</td><td>{stats['tov']}</td><td>{stats['fg_pct']:.1%}</td></tr>\n"
-        )
+        body += f"{team}: TOV: {stats['tov']}  FG%: {stats['fg_pct']:.1%}\n"
 
-    props_rows = ""
+    body += "\nTOP PROPS — Best FG% & Fewest Turnovers\n"
+    body += "-" * 30 + "\n"
     for p in top_props:
-        props_rows += (
-            f"<tr><td>{p['player']}</td><td>{p['team']}</td>"
-            f"<td>{p['fg_pct']:.1%}</td><td>{p['tov']}</td></tr>\n"
-        )
+        body += f"{p['player']} ({p['team']})  FG%: {p['fg_pct']:.1%}  TOV: {p['tov']}\n"
 
-    teams = {}
-    for row in rows:
-        teams.setdefault(row["team"], []).append(row)
+    msg = MIMEText(body)
+    msg["Subject"] = f"Game Update — {now}"
+    msg["From"]    = os.environ.get("GMAIL_USER")
+    msg["To"]      = os.environ.get("GMAIL_USER")
 
-    body = ""
-    for team, players in teams.items():
-        starters = [p for p in players if p["starter"] == "Y"]
-        bench    = [p for p in players if p["starter"] == "N"]
-
-        body += f'<tr class="team-header"><td colspan="{len(headers)}">{team}</td></tr>\n'
-        body += f'<tr class="group-header"><td colspan="{len(headers)}">Starters</td></tr>\n'
-        for row in starters:
-            tds = "".join(f"<td>{row.get(h, '')}</td>" for h in headers)
-            body += f"<tr>{tds}</tr>\n"
-        body += f'<tr class="group-header"><td colspan="{len(headers)}">Bench</td></tr>\n'
-        for row in bench:
-            tds = "".join(f"<td>{row.get(h, '')}</td>" for h in headers)
-            body += f"<tr>{tds}</tr>\n"
-
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>2026 NCAA Championship Box Score</title>
-<style>
-  body {{ font-family: Arial, sans-serif; font-size: 13px; padding: 16px; background: #fff; color: #000; }}
-  h2   {{ margin: 0 0 4px 0; }}
-  h3   {{ margin: 16px 0 6px 0; font-size: 14px; }}
-  p    {{ margin: 0 0 12px 0; color: #555; font-size: 11px; }}
-  table {{ border-collapse: collapse; width: 100%; margin-bottom: 24px; }}
-  th, td {{ border: 1px solid #ccc; padding: 5px 8px; text-align: left; white-space: nowrap; }}
-  th {{ background: #f0f0f0; font-weight: bold; }}
-  tr:nth-child(even) {{ background: #f9f9f9; }}
-  tr:hover {{ background: #fffbcc; }}
-  tr.team-header td  {{ background: #002d62; color: #fff; font-weight: bold; font-size: 14px; padding: 8px; }}
-  tr.group-header td {{ background: #dde3ec; font-weight: bold; font-size: 12px; }}
-  .advantage {{ background: #e8f5e9; border: 1px solid #a5d6a7; padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; font-size: 14px; }}
-  .advantage strong {{ color: #1b5e20; }}
-  .props {{ background: #fff8e1; border: 1px solid #ffe082; padding: 10px 14px; border-radius: 4px; margin-bottom: 24px; }}
-  .props h3 {{ margin: 0 0 8px 0; color: #e65100; }}
-</style>
-</head>
-<body>
-<h2>2026 NCAA Championship — Michigan vs UConn</h2>
-<p>Michigan 69 · UConn 63 &nbsp;|&nbsp; April 6, 2026 · Lucas Oil Stadium &nbsp;|&nbsp; Last updated: {now}</p>
-
-<div class="advantage">
-  <strong>Advantage: {advantage_str}</strong><br>
-  Based on fewest turnovers and highest field goal percentage.
-</div>
-
-<div class="props">
-  <h3>Team Totals</h3>
-  <table>
-    <thead><tr><th>Team</th><th>Turnovers</th><th>FG%</th></tr></thead>
-    <tbody>{team_stats_rows}</tbody>
-  </table>
-</div>
-
-<div class="props">
-  <h3>Possible Props — Best FG% &amp; Fewest Turnovers</h3>
-  <table>
-    <thead><tr><th>Player</th><th>Team</th><th>FG%</th><th>TOV</th></tr></thead>
-    <tbody>{props_rows}</tbody>
-  </table>
-</div>
-
-<h3>Full Box Score</h3>
-<div style="overflow-x:auto">
-<table>
-  <thead><tr>{th_cells}</tr></thead>
-  <tbody>{body}</tbody>
-</table>
-</div>
-</body>
-</html>"""
-
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"  ✓  HTML saved → '{filename}'")
-
-# ── Push to GitHub ────────────────────────────────────────────────────────────
-
-def push_to_github():
-    try:
-        subprocess.run(["git", "add", "boxscore.html", "boxscore.csv"], check=True)
-        subprocess.run(["git", "commit", "-m", f"refresh {datetime.now().strftime('%Y-%m-%d %H:%M')}"], check=True)
-        subprocess.run(["git", "push"], check=True)
-        print("Pushed to GitHub.")
-    except subprocess.CalledProcessError as e:
-        print(f"Git push failed: {e}")
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(os.environ.get("GMAIL_USER"), os.environ.get("GMAIL_APP_PASSWORD"))
+        server.send_message(msg)
+    print("  ✓  Email sent.")
