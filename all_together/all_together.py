@@ -8,6 +8,7 @@ import schedule
 import time
 import demo2
 import demo3
+import demo4
 
 ESPN_SITE_KEY = "espn"
 
@@ -30,7 +31,7 @@ async def job():
     # Fall back to demo3 ESPN only
     try:
         print("=" * 58)
-        print("  Trying demo3 (AI-assisted, ESPN)...")
+        print("  Trying demo3 (Regex ESPN)...")
         print("=" * 58)
         data = await demo3.scrape_and_extract(ESPN_SITE_KEY)
         demo3.print_results(data, demo3.SITES[ESPN_SITE_KEY]["name"])
@@ -41,6 +42,21 @@ async def job():
         print("  ✓  demo3 succeeded.")
     except Exception as e:
         print(f"  ✗  demo3 also failed: {e}")
+    
+    # Fall back to demo4 ESPN only
+    try:
+        print("=" * 58)
+        print("  Trying demo3 (AI-assisted, ESPN)...")
+        print("=" * 58)
+        data = await demo4.scrape_and_extract(ESPN_SITE_KEY)
+        demo4.print_results(data, demo3.SITES[ESPN_SITE_KEY]["name"])
+        if data:
+            demo4.save_to_csv(data, "stats_espn.csv")
+            demo4.save_html({ESPN_SITE_KEY: data}, "dashboard.html")
+            demo4.push_to_github()
+        print("  ✓  demo4 succeeded.")
+    except Exception as e:
+        print(f"  ✗  demo4 also failed: {e}")
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 

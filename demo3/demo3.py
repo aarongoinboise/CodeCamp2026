@@ -1,389 +1,263 @@
-import json
-import os
-import sys
+"""
+scraper.py — Resilient box score scraper (function library)
+=============================================================
+Call parse_args() to get the source, then use:
+  - load_html(args)        → raw HTML string
+  - scrape_resilient(html) → structured dict
+  - save_csv(data, path)   → writes CSV
+
+Args (exactly one per run):
+  --v1 FILE    local HTML, V1 layout (table + semantic classes)
+  --v2 FILE    local HTML, V2 layout (table + data-* attributes)
+  --v3 FILE    local HTML, V3 layout (div/span grid, no table)
+  --espn       fetch live from ESPN via requests
+"""
+
+from bs4 import BeautifulSoup
+import re
 import csv
 import argparse
-import asyncio
-import subprocess
-import schedule
-import time
-import google.generativeai as genai
-from datetime import datetime
 
-# ── Target sites ───────────────────────────────────────────────────────────────
+# ── ESPN live URL ─────────────────────────────────────────────────────────────
 
-SITES = {
-    "sports-ref": {
-        "name": "Sports Reference (CBB)",
-        "url": "https://www.sports-reference.com/cbb/boxscores/2026-04-06-20-michigan.html",
-        "note": "Dense stats tables, Wikipedia-style HTML, minimal JS",
-    },
-    "espn": {
-        "name": "ESPN Box Score",
-        "url": "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600",
-        "note": "React-rendered SPA, requires JS execution, ESPN proprietary classes",
-    },
-}
+ESPN_URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
 
-# ── AI Extraction ─────────────────────────────────────────────────────────────
+# Column order ESPN always uses — position-based, never rely on class names
+COL_ORDER = ["name", "min", "pts", "fg", "3pt", "ft", "reb", "ast", "to", "stl", "blk"]
 
-def extract_with_ai(html: str, intent: str, source_label: str) -> dict:
+CSV_FIELDS = [
+    "team", "player", "starter",
+    "MIN", "PTS", "FG", "3PT", "FT",
+    "REB", "AST", "TO", "STL", "BLK",
+    "OREB", "DREB", "PF",
+]
+
+
+# =============================================================================
+# ARG PARSING
+# =============================================================================
+
+def parse_args():
     """
-    Send raw HTML to Gemini and ask it to extract structured data.
-    Works regardless of CSS class names, site structure, or JS framework.
-    The same function handles Sports Reference AND ESPN without modification.
+    Parse CLI args. Enforces exactly one source flag per run.
+    Returns argparse.Namespace with attrs: v1, v2, v3, espn
     """
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    parser = argparse.ArgumentParser(description="Resilient ESPN box score scraper")
 
-    print(f"\n  Sending {source_label} HTML to Gemini ({len(html):,} chars)...")
-    print(f"  Extraction intent: \"{intent[:80]}...\"\n")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--v1",   metavar="FILE", help="Local HTML, V1 layout (table + semantic classes)")
+    group.add_argument("--v2",   metavar="FILE", help="Local HTML, V2 layout (table + data-* attributes)")
+    group.add_argument("--v3",   metavar="FILE", help="Local HTML, V3 layout (div/span grid, no table)")
+    group.add_argument("--espn", action="store_true", help="Fetch live from ESPN via requests")
 
-    prompt = f"""You are a sports data extraction assistant. Extract structured box score data from this HTML.
-
-SOURCE: {source_label}
-EXTRACTION GOAL: {intent}
-
-Return ONLY valid JSON. No explanation, no markdown, no code blocks — just raw JSON.
-
-The JSON should have this structure:
-{{
-  "game": {{
-    "home_team": "",
-    "away_team": "",
-    "home_score": 0,
-    "away_score": 0,
-    "game_date": "",
-    "status": "",
-    "spread": null,
-    "over_under": null
-  }},
-  "players": [
-    {{
-      "name": "",
-      "team": "",
-      "position": "",
-      "minutes": 0,
-      "points": 0,
-      "rebounds": 0,
-      "assists": 0,
-      "fouls": 0,
-      "plus_minus": "",
-      "fg": "",
-      "fg3": "",
-      "ft": "",
-      "steals": 0,
-      "blocks": 0,
-      "turnovers": 0
-    }}
-  ],
-  "foul_trouble": [
-    {{ "name": "", "team": "", "fouls": 0, "minutes": 0, "note": "" }}
-  ],
-  "injuries": [],
-  "team_totals": []
-}}
-
-Rules:
-- Include ALL players from BOTH teams with their team name filled in.
-- For foul_trouble, include any player with 3+ fouls.
-- If a field isn't present in the HTML, use null — never guess.
-- minutes can be a decimal (e.g. 32.5) or integer, use whatever the source provides.
-- Parse shooting as "made-attempted" strings (e.g. "7-12").
-
-HTML (first 12000 chars):
-{html[:12000]}"""
-
-    response = model.generate_content(prompt)
-    raw = response.text.strip()
-
-    # Strip markdown fences if model added them despite instructions
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip()
-
-    try:
-        data = json.loads(raw)
-        player_count = len(data.get("players", []))
-        print(f"  ✓  Gemini extracted {player_count} players from {source_label}.")
-        return data
-    except json.JSONDecodeError as e:
-        print(f"  ⚠  JSON parse error from {source_label}: {e}")
-        print(f"     Raw response snippet: {raw[:300]}")
-        return {}
+    return parser.parse_args()
 
 
-# ── Playwright scraper ─────────────────────────────────────────────────────────
+# =============================================================================
+# HTML LOADING
+# =============================================================================
 
-async def scrape_and_extract(site_key: str) -> dict:
+def load_html(args) -> str:
     """
-    1. Use Playwright to fetch fully-rendered HTML (handles React/JS sites like ESPN)
-    2. Pass raw HTML to Gemini for intent-based extraction
-    No CSS selectors. No site-specific parsing logic. Just intent.
+    Load raw HTML from the source indicated by parsed args.
+    --v1/v2/v3: reads the given local file path.
+    --espn:     fetches the live ESPN page with a browser User-Agent.
+    Returns the raw HTML string.
     """
-    from playwright.async_api import async_playwright
-    import asyncio as aio
-
-    site = SITES[site_key]
-    url  = site["url"]
-
-    print(f"\n{'═' * 58}")
-    print(f"  Site  : {site['name']}")
-    print(f"  URL   : {url}")
-    print(f"  Note  : {site['note']}")
-    print(f"{'═' * 58}")
-    print(f"\n  Launching headless browser...")
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            user_agent=(
+    if args.espn:
+        import requests
+        headers = {
+            "User-Agent": (
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/122.0.0.0 Safari/537.36"
-            ),
-            viewport={"width": 1440, "height": 900},
-        )
-        page = await context.new_page()
+            )
+        }
+        resp = requests.get(ESPN_URL, headers=headers, timeout=15)
+        resp.raise_for_status()
+        return resp.text
 
-        # Suppress webdriver detection
-        await page.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', { get: () => false });"
-        )
+    # --v1, --v2, --v3 all point to a local file path
+    path = args.v1 or args.v2 or args.v3
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
 
-        print(f"  Navigating to page...")
-        await page.goto(url, wait_until="networkidle", timeout=45000)
 
-        # ESPN is a React SPA — give it extra time to hydrate
-        if site_key == "espn":
-            print(f"  Waiting for ESPN React app to render...")
-            await aio.sleep(4)
-        else:
-            await aio.sleep(1)
+# =============================================================================
+# PARSING — resilient, position-based, layout-agnostic
+# =============================================================================
 
-        html = await page.content()
-        await browser.close()
+def looks_like_stat_row(cells):
+    """True if the row has at least 2 shot-attempt patterns like '5-11'."""
+    attempts = sum(1 for c in cells if re.match(r"^\d{1,2}-\d{1,2}$", c.strip()))
+    return attempts >= 2
 
-    print(f"  Got {len(html):,} chars of rendered HTML.")
 
-    intent = (
-        "Extract the final game score, both teams' full player box score stats "
-        "(points, rebounds, assists, steals, blocks, turnovers, fouls, FG, 3PT, FT, minutes), "
-        "and flag any player with 3+ fouls as foul trouble — that's a live betting signal. "
-        "Include both starters and bench players. Identify each player's team."
+def extract_score(soup):
+    """
+    Find the final score by locating prominent numeric text nodes
+    outside of table cells (scores live in headers, not stat rows).
+    Returns [score1, score2] as strings, highest first.
+    """
+    candidates = []
+    for el in soup.find_all(string=re.compile(r"^\d{2,3}$")):
+        text = el.strip()
+        parent_tag = el.parent.name
+        if parent_tag not in ("td", "th", "li", "script", "style"):
+            try:
+                val = int(text)
+                if 40 <= val <= 200:  # realistic finished-game score range
+                    candidates.append((val, el))
+            except ValueError:
+                pass
+    candidates.sort(key=lambda x: -x[0])
+    if len(candidates) >= 2:
+        return [str(candidates[0][0]), str(candidates[1][0])]
+    return []
+
+
+def extract_team_names(soup):
+    """
+    Pull team names across all 3 local HTML layouts and live ESPN.
+    Tries progressively broader selectors; returns up to 2 names.
+    """
+    names = []
+    selectors = [
+        ("span", re.compile(r"^team.?name$",           re.I)),  # V1
+        ("span", re.compile(r"ScoreHeader__TeamName",  re.I)),  # V2
+        ("span", re.compile(r"^long.?name$",           re.I)),  # V3
+        ("div",  re.compile(r"ScoreCell__TeamName|teamName", re.I)),  # live ESPN
+        ("span", re.compile(r"ScoreCell__TeamName|teamName", re.I)),  # live ESPN alt
+    ]
+    for tag, cls in selectors:
+        for el in soup.find_all(tag, class_=cls):
+            t = el.get_text(strip=True)
+            if t and len(t) > 3 and not t.isdigit() and t not in names:
+                names.append(t)
+        if len(names) >= 2:
+            break
+    return names[:2]
+
+
+def extract_players(soup):
+    """
+    Extract player rows regardless of table vs div/span layout.
+    Uses column position for stat identity — ESPN column order is always:
+      name, min, pts, fg, 3pt, ft, reb, ast, to, stl, blk
+
+    Returns:
+      players: list of dicts for individual players
+      totals:  list of dicts for TEAM total rows
+    """
+    players = []
+    totals  = []
+
+    # Candidates from both table-based and div-based layouts
+    row_candidates = soup.find_all("tr") + soup.find_all(
+        "div", class_=re.compile(r"(row|athlete)", re.I)
     )
 
-    return extract_with_ai(html, intent, site["name"])
+    for row in row_candidates:
+        cells = [
+            el.get_text(strip=True)
+            for el in row.find_all(["td", "th", "span"])
+            if el.get_text(strip=True)
+        ]
 
-
-# ── Output helpers ─────────────────────────────────────────────────────────────
-
-def print_results(data: dict, site_label: str):
-    """Pretty-print extracted data with site label."""
-    if not data:
-        print(f"\n  [No data extracted from {site_label}]")
-        return
-
-    print(f"\n  ┌─ {site_label.upper()} ───────────────────────────────")
-
-    game = data.get("game", {})
-    if game:
-        home  = game.get("home_team", "?")
-        away  = game.get("away_team", "?")
-        hs    = game.get("home_score", "?")
-        as_   = game.get("away_score", "?")
-        date  = game.get("game_date", "")
-        status= game.get("status", "")
-        print(f"  │  {away} @ {home}")
-        print(f"  │  Score  : {as_} — {hs}")
-        if date:   print(f"  │  Date   : {date}")
-        if status: print(f"  │  Status : {status}")
-        spread = game.get("spread")
-        ou     = game.get("over_under")
-        if spread: print(f"  │  Spread : {spread}   O/U: {ou}")
-    print(f"  └────────────────────────────────────────────────")
-
-    players = data.get("players", [])
-    if players:
-        print(f"\n  {'PLAYER':<22} {'TEAM':<12} {'POS':<5} {'MIN':<5} {'PTS':<5} "
-              f"{'REB':<5} {'AST':<5} {'STL':<5} {'BLK':<5} {'TO':<5} {'FOULS':<7}")
-        print("  " + "─" * 82)
-        for p in players:
-            foul_flag = " ⚠" if (p.get("fouls") or 0) >= 3 else ""
-            team_abbr = str(p.get("team", ""))[:11]
-            print(f"  {str(p.get('name','')):<22} "
-                  f"{team_abbr:<12} "
-                  f"{str(p.get('position','')):<5} "
-                  f"{str(p.get('minutes','')):<5} "
-                  f"{str(p.get('points','')):<5} "
-                  f"{str(p.get('rebounds','')):<5} "
-                  f"{str(p.get('assists','')):<5} "
-                  f"{str(p.get('steals','')):<5} "
-                  f"{str(p.get('blocks','')):<5} "
-                  f"{str(p.get('turnovers','')):<5} "
-                  f"{str(p.get('fouls','')):<7}"
-                  f"{foul_flag}")
-
-    foul_trouble = data.get("foul_trouble", [])
-    if foul_trouble:
-        print(f"\n  ⚠  FOUL TROUBLE ({len(foul_trouble)} player(s) with 3+ fouls):")
-        for p in foul_trouble:
-            print(f"     {p.get('name')} ({p.get('team','')}) — "
-                  f"{p.get('fouls')} fouls in {p.get('minutes')} min  |  {p.get('note','')}")
-        print()
-        print("  → Live bet signal: high-foul players likely sit. Adjust spread model.")
-
-    injuries = data.get("injuries", [])
-    if injuries:
-        print(f"\n  INJURY REPORT:")
-        for inj in injuries:
-            print(f"     {inj}")
-
-
-def save_to_csv(data: dict, filename: str):
-    """Save player stats to CSV for model input."""
-    players = data.get("players", [])
-    if not players:
-        return
-
-    game = data.get("game", {})
-    for p in players:
-        p["game_home"]   = game.get("home_team", "")
-        p["game_away"]   = game.get("away_team", "")
-        p["home_score"]  = game.get("home_score", "")
-        p["away_score"]  = game.get("away_score", "")
-        p["spread"]      = game.get("spread", "")
-        p["over_under"]  = game.get("over_under", "")
-
-    keys = list(players[0].keys())
-    with open(filename, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(players)
-
-    print(f"\n  ✓  Saved → '{filename}' ({len(players)} rows)")
-    print("     Ready to feed into your betting model or analysis script.")
-
-
-# ── HTML output ───────────────────────────────────────────────────────────────
-
-def save_html(all_results: dict, html_file: str):
-    now = datetime.now().strftime("%b %d %Y %I:%M %p")
-    body = ""
-
-    for site_key, data in all_results.items():
-        if not data:
+        if len(cells) < 5:
             continue
-        site_label = SITES[site_key]["name"]
-        game = data.get("game", {})
-        players = data.get("players", [])
-        foul_trouble = data.get("foul_trouble", [])
+        if not looks_like_stat_row(cells):
+            continue
+        # Skip header rows
+        if cells[0].upper() in ("STARTERS", "BENCH", "MIN", "PLAYER"):
+            continue
 
-        home  = game.get("home_team", "?")
-        away  = game.get("away_team", "?")
-        hs    = game.get("home_score", "?")
-        as_   = game.get("away_score", "?")
+        row_classes = " ".join(row.get("class", []))
+        is_starter  = "bench" not in row_classes.lower()
 
-        foul_rows = ""
-        for p in foul_trouble:
-            foul_rows += f"<tr><td>{p.get('name')}</td><td>{p.get('team')}</td><td>{p.get('fouls')}</td><td>{p.get('minutes')}</td></tr>\n"
+        # Team totals row
+        if cells[0].upper() in ("TEAM", "TOTALS"):
+            row_data = {col: (cells[i] if i < len(cells) else None)
+                        for i, col in enumerate(COL_ORDER)}
+            row_data["starter"] = None
+            totals.append(row_data)
+            continue
 
-        player_rows = ""
-        for p in players:
-            flag = " ⚠" if (p.get("fouls") or 0) >= 3 else ""
-            player_rows += (
-                f"<tr>"
-                f"<td>{p.get('name','')}{flag}</td>"
-                f"<td>{p.get('team','')}</td>"
-                f"<td>{p.get('position','')}</td>"
-                f"<td>{p.get('minutes','')}</td>"
-                f"<td>{p.get('points','')}</td>"
-                f"<td>{p.get('rebounds','')}</td>"
-                f"<td>{p.get('assists','')}</td>"
-                f"<td>{p.get('steals','')}</td>"
-                f"<td>{p.get('blocks','')}</td>"
-                f"<td>{p.get('turnovers','')}</td>"
-                f"<td>{p.get('fouls','')}</td>"
-                f"<td>{p.get('fg','')}</td>"
-                f"<td>{p.get('fg3','')}</td>"
-                f"<td>{p.get('ft','')}</td>"
-                f"</tr>\n"
-            )
+        row_data = {col: (cells[i] if i < len(cells) else None)
+                    for i, col in enumerate(COL_ORDER)}
+        row_data["starter"] = "Y" if is_starter else "N"
+        players.append(row_data)
 
-        foul_section = ""
-        if foul_trouble:
-            foul_section = f"""
-<div class="props">
-  <h3>⚠ Foul Trouble — Live Bet Signal</h3>
-  <table>
-    <thead><tr><th>Player</th><th>Team</th><th>Fouls</th><th>Minutes</th></tr></thead>
-    <tbody>{foul_rows}</tbody>
-  </table>
-</div>"""
-
-        body += f"""
-<h2>{site_label}</h2>
-<div class="advantage">
-  <strong>{away} @ {home}</strong> &nbsp;|&nbsp; Score: {as_} — {hs}
-</div>
-{foul_section}
-<h3>Full Box Score</h3>
-<div style="overflow-x:auto">
-<table>
-  <thead><tr>
-    <th>Player</th><th>Team</th><th>Pos</th><th>Min</th>
-    <th>Pts</th><th>Reb</th><th>Ast</th><th>Stl</th>
-    <th>Blk</th><th>TO</th><th>Fouls</th>
-    <th>FG</th><th>3PT</th><th>FT</th>
-  </tr></thead>
-  <tbody>{player_rows}</tbody>
-</table>
-</div>
-"""
-
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Adaptive Scraper — Box Scores</title>
-<style>
-  body {{ font-family: Arial, sans-serif; font-size: 13px; padding: 10px; background: #fff; color: #000; }}
-  h2   {{ margin: 24px 0 4px 0; }}
-  h3   {{ margin: 16px 0 6px 0; font-size: 14px; }}
-  p    {{ margin: 0 0 10px 0; color: #555; font-size: 11px; }}
-  table {{ border-collapse: collapse; width: 100%; margin-bottom: 24px; }}
-  th, td {{ border: 1px solid #ccc; padding: 5px 8px; text-align: left; white-space: nowrap; }}
-  th {{ background: #f0f0f0; font-weight: bold; }}
-  tr:nth-child(even) {{ background: #f9f9f9; }}
-  tr:hover {{ background: #fffbcc; }}
-  .advantage {{ background: #e8f5e9; border: 1px solid #a5d6a7; padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; font-size: 14px; }}
-  .advantage strong {{ color: #1b5e20; }}
-  .props {{ background: #fff8e1; border: 1px solid #ffe082; padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; }}
-  .props h3 {{ margin: 0 0 8px 0; color: #e65100; }}
-</style>
-</head>
-<body>
-<h1>AI Adaptive Scraper — Box Scores</h1>
-<p>Last updated: {now} · Re-run script to refresh</p>
-{body}
-</body>
-</html>"""
-
-    with open(html_file, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"HTML saved -> {html_file}")
+    return players, totals
 
 
-# ── Push to GitHub ────────────────────────────────────────────────────────────
+def scrape_resilient(html: str) -> dict:
+    """
+    Main scrape entry point. Parses raw HTML and returns:
+      {
+        "scores":     [score1, score2],
+        "team_names": [team1, team2],
+        "players":    [...],
+        "totals":     [...],
+      }
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    players, totals = extract_players(soup)
+    return {
+        "scores":     extract_score(soup),
+        "team_names": extract_team_names(soup),
+        "players":    players,
+        "totals":     totals,
+    }
 
-def push_to_github():
-    try:
-        subprocess.run(["git", "add", "dashboard.html"], check=True)
-        subprocess.run(["git", "commit", "-m", f"refresh {datetime.now().strftime('%Y-%m-%d %H:%M')}"], check=True)
-        subprocess.run(["git", "push"], check=True)
-        print("Pushed to GitHub.")
-    except subprocess.CalledProcessError as e:
-        print(f"Git push failed: {e}")
+
+# =============================================================================
+# CSV OUTPUT
+# =============================================================================
+
+def save_csv(data: dict, out_path: str):
+    """
+    Write player rows to CSV with columns:
+      team, player, starter, MIN, PTS, FG, 3PT, FT,
+      REB, AST, TO, STL, BLK, OREB, DREB, PF
+
+    Team assignment: the player list is split in half — first half gets
+    team_names[0], second half gets team_names[1]. ESPN always lists one
+    full team then the other.
+
+    OREB, DREB, PF are left blank when not present in the source HTML.
+    """
+    players    = data["players"]
+    team_names = data.get("team_names", [])
+
+    mid = len(players) // 2
+
+    def get_team(idx):
+        if len(team_names) == 2:
+            return team_names[0] if idx < mid else team_names[1]
+        if len(team_names) == 1:
+            return team_names[0]
+        return ""
+
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        writer.writeheader()
+        for i, p in enumerate(players):
+            writer.writerow({
+                "team":    get_team(i),
+                "player":  p.get("name", ""),
+                "starter": p.get("starter", ""),
+                "MIN":     p.get("min", ""),
+                "PTS":     p.get("pts", ""),
+                "FG":      p.get("fg", ""),
+                "3PT":     p.get("3pt", ""),
+                "FT":      p.get("ft", ""),
+                "REB":     p.get("reb", ""),
+                "AST":     p.get("ast", ""),
+                "TO":      p.get("to", ""),
+                "STL":     p.get("stl", ""),
+                "BLK":     p.get("blk", ""),
+                "OREB":    "",  # not in simulated HTML
+                "DREB":    "",  # not in simulated HTML
+                "PF":      "",  # not in simulated HTML
+            })
