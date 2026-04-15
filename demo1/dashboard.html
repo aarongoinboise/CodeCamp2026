@@ -4,6 +4,20 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>2026 NCAA Championship Boxscore</title>
+<script>
+  (function() {
+    const PASSWORD = "123";
+    const entered = sessionStorage.getItem("auth");
+    if (entered !== PASSWORD) {
+      const attempt = prompt("Enter password:");
+      if (attempt !== PASSWORD) {
+        document.write("<h2>Access denied.</h2>");
+        throw new Error("blocked");
+      }
+      sessionStorage.setItem("auth", attempt);
+    }
+  })();
+</script>
 <style>
   body { font-family: Arial, sans-serif; font-size: 13px; padding: 10px; background: #fff; color: #000; }
   h2   { margin: 0 0 4px 0; }
@@ -23,7 +37,7 @@
 </head>
 <body>
 <h2>2026 NCAA Championship — Michigan vs UConn</h2>
-<p>Last updated: Apr 11 2026 07:13 PM · Re-run script to refresh</p>
+<p>Last updated: Apr 15 2026 04:11 PM · Re-run script to refresh</p>
 
 <div class="advantage">
   <strong>Advantage: Michigan (TOV: 10, FG%: 38.2%)</strong><br>
