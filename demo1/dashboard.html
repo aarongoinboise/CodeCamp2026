@@ -6,15 +6,22 @@
 <title>2026 NCAA Championship Boxscore</title>
 <script>
   (function() {
-    const PASSWORD = "123";
+    const HASH = "a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3";
     const entered = sessionStorage.getItem("auth");
-    if (entered !== PASSWORD) {
+    if (entered !== HASH) {
       const attempt = prompt("Enter password:");
-      if (attempt !== PASSWORD) {
-        document.write("<h2>Access denied.</h2>");
-        throw new Error("blocked");
-      }
-      sessionStorage.setItem("auth", attempt);
+      const msgBuffer = new TextEncoder().encode(attempt);
+      crypto.subtle.digest("SHA-256", msgBuffer).then(hashBuffer => {
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+        if (hashHex !== HASH) {
+          document.body.innerHTML = "<h2>Access denied.</h2>";
+        } else {
+          sessionStorage.setItem("auth", hashHex);
+          location.reload();
+        }
+      });
+      throw new Error("checking...");
     }
   })();
 </script>
@@ -37,7 +44,7 @@
 </head>
 <body>
 <h2>2026 NCAA Championship — Michigan vs UConn</h2>
-<p>Last updated: Apr 15 2026 04:11 PM · Re-run script to refresh</p>
+<p>Last updated: Apr 15 2026 04:19 PM · Re-run script to refresh</p>
 
 <div class="advantage">
   <strong>Advantage: Michigan (TOV: 10, FG%: 38.2%)</strong><br>
