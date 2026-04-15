@@ -7,10 +7,10 @@ Call parse_args() to get the source, then use:
   - send_email(data)       → emails stats to yourself
 
 Args (exactly one per run):
-  --v1 FILE    local HTML, V1 layout (table + semantic classes)
-  --v2 FILE    local HTML, V2 layout (table + data-* attributes)
-  --v3 FILE    local HTML, V3 layout (div/span grid, no table)
-  --espn       fetch live from ESPN via requests
+  --v1     hosted HTML, V1 layout (table + semantic classes)
+  --v2     hosted HTML, V2 layout (table + data-* attributes)
+  --v3     hosted HTML, V3 layout (div/span grid, no table)
+  --espn   fetch live from ESPN via requests
 """
 
 from bs4 import BeautifulSoup
@@ -21,12 +21,16 @@ import time
 import schedule
 import smtplib
 import os
+import requests
 from email.mime.text import MIMEText
 from datetime import datetime
 
-# ── ESPN live URL ─────────────────────────────────────────────────────────────
+# ── URLs ──────────────────────────────────────────────────────────────────────
 
 ESPN_URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
+V1_URL   = "https://your-v1-url-here.com"
+V2_URL   = "https://your-v2-url-here.com"
+V3_URL   = "https://your-v3-url-here.com"
 
 COL_ORDER = ["name", "min", "pts", "fg", "3pt", "ft", "reb", "ast", "to", "stl", "blk"]
 
@@ -38,9 +42,9 @@ COL_ORDER = ["name", "min", "pts", "fg", "3pt", "ft", "reb", "ast", "to", "stl",
 def parse_args():
     parser = argparse.ArgumentParser(description="Resilient ESPN box score scraper")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--v1",   metavar="FILE", help="Local HTML, V1 layout (table + semantic classes)")
-    group.add_argument("--v2",   metavar="FILE", help="Local HTML, V2 layout (table + data-* attributes)")
-    group.add_argument("--v3",   metavar="FILE", help="Local HTML, V3 layout (div/span grid, no table)")
+    group.add_argument("--v1",   action="store_true", help="Hosted HTML, V1 layout (table + semantic classes)")
+    group.add_argument("--v2",   action="store_true", help="Hosted HTML, V2 layout (table + data-* attributes)")
+    group.add_argument("--v3",   action="store_true", help="Hosted HTML, V3 layout (div/span grid, no table)")
     group.add_argument("--espn", action="store_true", help="Fetch live from ESPN via requests")
     return parser.parse_args()
 
@@ -51,21 +55,24 @@ def parse_args():
 
 def load_html(args) -> str:
     if args.espn:
-        import requests
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/122.0.0.0 Safari/537.36"
-            )
-        }
-        resp = requests.get(ESPN_URL, headers=headers, timeout=15)
-        resp.raise_for_status()
-        return resp.text
+        url = ESPN_URL
+    elif args.v1:
+        url = V1_URL
+    elif args.v2:
+        url = V2_URL
+    elif args.v3:
+        url = V3_URL
 
-    path = args.v1 or args.v2 or args.v3
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read()
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        )
+    }
+    resp = requests.get(url, headers=headers, timeout=15)
+    resp.raise_for_status()
+    return resp.text
 
 
 # =============================================================================
@@ -181,11 +188,9 @@ def analyze(data: dict):
             return team_names[0]
         return "Unknown"
 
-    # Attach team to each player
     for i, p in enumerate(players):
         p["team"] = get_team(i)
 
-    # Team totals
     teams = {}
     for p in players:
         teams.setdefault(p["team"], []).append(p)
@@ -207,7 +212,6 @@ def analyze(data: dict):
         fg_pct = total_fg / total_fga if total_fga else 0
         team_stats[team] = {"tov": total_tov, "fg_pct": fg_pct}
 
-    # Advantage
     t1, t2 = list(team_stats.keys())
     if team_stats[t1]["tov"] == team_stats[t2]["tov"] and team_stats[t1]["fg_pct"] == team_stats[t2]["fg_pct"]:
         advantage_str = "Even — no clear advantage"
@@ -219,7 +223,6 @@ def analyze(data: dict):
         adv = team_stats[advantage_team]
         advantage_str = f"{advantage_team} (TOV: {adv['tov']}, FG%: {adv['fg_pct']:.1%})"
 
-    # Top props
     player_scores = []
     for p in players:
         name = p.get("name", "")
