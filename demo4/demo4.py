@@ -9,6 +9,8 @@ from bs4 import BeautifulSoup
 from ollama import Client
 from email.mime.text import MIMEText
 from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv()
 
 # ─────────────────────────────────────────────────────────────
 # CONFIG
@@ -24,6 +26,7 @@ SITES = {
         "url": "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600",
     },
 }
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 ollama = Client()
 MODEL = "llama3.1"

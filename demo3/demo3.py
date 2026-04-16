@@ -24,10 +24,13 @@ import os
 import requests
 from email.mime.text import MIMEText
 from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv()
 
 # ── URLs ──────────────────────────────────────────────────────────────────────
 
 ESPN_URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 V1_URL   = "https://your-v1-url-here.com"
 V2_URL   = "https://your-v2-url-here.com"
 V3_URL   = "https://your-v3-url-here.com"

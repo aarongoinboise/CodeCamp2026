@@ -5,11 +5,12 @@ import schedule
 import time
 import argparse
 import os
-import smtplib
-from email.mime.text import MIMEText
+from dotenv import load_dotenv
+load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────────────────────
 BOXSCORE_URL = "https://www.sports-reference.com/cbb/boxscores/2026-04-06-20-michigan.html"
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 HEADERS = {
     "User-Agent": (
@@ -163,36 +164,22 @@ def analyze(rows):
     return advantage_str, top_props, team_stats
 
 
-# ── Send Email ────────────────────────────────────────────────────────────────
+# ── Send to Discord ───────────────────────────────────────────────────────────
 
-def send_email(advantage_str, top_props, team_stats):
+def send_discord(advantage_str, top_props, team_stats):
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
 
-    body = f"2026 NCAA Championship — Michigan vs UConn\nLast updated: {now}\n"
-    body += "=" * 40 + "\n\n"
-
-    body += f"ADVANTAGE: {advantage_str}\n"
-    body += "Based on fewest turnovers and highest field goal percentage.\n\n"
-
-    body += "TEAM TOTALS\n"
-    body += "-" * 30 + "\n"
+    body = f"**NCAA Championship — Michigan vs UConn**\n`{now}`\n"
+    body += f"\n**ADVANTAGE:** {advantage_str}\n"
+    body += "\n**TEAM TOTALS**\n"
     for team, stats in team_stats.items():
-        body += f"{team}: TOV: {stats['tov']}  FG%: {stats['fg_pct']:.1%}\n"
-
-    body += "\nTOP PROPS — Best FG% & Fewest Turnovers\n"
-    body += "-" * 30 + "\n"
+        body += f"{team}: TOV {stats['tov']}  FG% {stats['fg_pct']:.1%}\n"
+    body += "\n**TOP PROPS**\n"
     for p in top_props:
-        body += f"{p['player']} ({p['team']})  FG%: {p['fg_pct']:.1%}  TOV: {p['tov']}\n"
+        body += f"{p['player']} ({p['team']})  FG% {p['fg_pct']:.1%}  TOV {p['tov']}\n"
 
-    msg = MIMEText(body)
-    msg["Subject"] = f"Game Update — {now}"
-    msg["From"]    = os.environ.get("GMAIL_USER")
-    msg["To"]      = os.environ.get("GMAIL_USER")
-
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(os.environ.get("GMAIL_USER"), os.environ.get("GMAIL_APP_PASSWORD"))
-        server.send_message(msg)
-    print("Email sent.")
+    requests.post(DISCORD_WEBHOOK, json={"content": body})
+    print("Discord message sent.")
 
 
 # ── Job ───────────────────────────────────────────────────────────────────────
@@ -201,7 +188,7 @@ def job():
     players = get_boxscore(BOXSCORE_URL)
     if players:
         advantage_str, top_props, team_stats = analyze(players)
-        send_email(advantage_str, top_props, team_stats)
+        send_discord(advantage_str, top_props, team_stats)
     else:
         print("No data found.")
 

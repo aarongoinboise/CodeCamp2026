@@ -1,23 +1,21 @@
 """
 DEMO 2 — Getting Blocked → Getting Around It
 Part A: naive requests call → 403
-Part B: Playwright with stealth → sends email with stats
+Part B: Playwright with stealth → sends Discord message with stats
 """
 
 import asyncio
 import random
-import smtplib
 from datetime import datetime
-from email.mime.text import MIMEText
 import os
 import requests
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
-import argparse
-import schedule
-import time
+from dotenv import load_dotenv
+load_dotenv()
 
 URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 # ── Part A: Naive — gets blocked ─────────────────────────────────────────────
 
@@ -158,7 +156,7 @@ async def evade_and_scrape():
         print(f"\n  ✓  {len(all_rows)} players parsed")
 
         advantage_str, top_props, team_stats = analyze(all_rows)
-        send_email(advantage_str, top_props, team_stats)
+        send_discord(advantage_str, top_props, team_stats)
 
 
 # ── Analysis ──────────────────────────────────────────────────────────────────
@@ -230,33 +228,19 @@ def analyze(rows):
     return advantage_str, top_props, team_stats
 
 
-# ── Send Email ────────────────────────────────────────────────────────────────
+# ── Send Discord ──────────────────────────────────────────────────────────────
 
-def send_email(advantage_str, top_props, team_stats):
+def send_discord(advantage_str, top_props, team_stats):
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
 
-    body = f"2026 NCAA Championship — Michigan vs UConn\nLast updated: {now}\n"
-    body += "=" * 40 + "\n\n"
-
-    body += f"ADVANTAGE: {advantage_str}\n"
-    body += "Based on fewest turnovers and highest field goal percentage.\n\n"
-
-    body += "TEAM TOTALS\n"
-    body += "-" * 30 + "\n"
+    body = f"**NCAA Championship — Michigan vs UConn**\n`{now}`\n"
+    body += f"\n**ADVANTAGE:** {advantage_str}\n"
+    body += "\n**TEAM TOTALS**\n"
     for team, stats in team_stats.items():
-        body += f"{team}: TOV: {stats['tov']}  FG%: {stats['fg_pct']:.1%}\n"
-
-    body += "\nTOP PROPS — Best FG% & Fewest Turnovers\n"
-    body += "-" * 30 + "\n"
+        body += f"{team}: TOV {stats['tov']}  FG% {stats['fg_pct']:.1%}\n"
+    body += "\n**TOP PROPS**\n"
     for p in top_props:
-        body += f"{p['player']} ({p['team']})  FG%: {p['fg_pct']:.1%}  TOV: {p['tov']}\n"
+        body += f"{p['player']} ({p['team']})  FG% {p['fg_pct']:.1%}  TOV {p['tov']}\n"
 
-    msg = MIMEText(body)
-    msg["Subject"] = f"Game Update — {now}"
-    msg["From"]    = os.environ.get("GMAIL_USER")
-    msg["To"]      = os.environ.get("GMAIL_USER")
-
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(os.environ.get("GMAIL_USER"), os.environ.get("GMAIL_APP_PASSWORD"))
-        server.send_message(msg)
-    print("  ✓  Email sent.")
+    requests.post(DISCORD_WEBHOOK, json={"content": body})
+    print("  ✓  Discord message sent.")

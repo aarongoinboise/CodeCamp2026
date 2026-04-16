@@ -9,8 +9,11 @@ import time
 import demo2
 import demo3
 import demo4
+from dotenv import load_dotenv
+load_dotenv()
 
 ESPN_SITE_KEY = "espn"
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 # ── Job ───────────────────────────────────────────────────────────────────────
 
