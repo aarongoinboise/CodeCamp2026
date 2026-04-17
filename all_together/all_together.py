@@ -6,9 +6,10 @@ import asyncio
 import argparse
 import schedule
 import time
-import demo2
-import demo3
-import demo4
+from demo2 import demo2
+from demo3 import demo3
+from demo4 import demo4
+import os
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -24,7 +25,6 @@ async def job():
         print("  Trying demo2 (Playwright stealth scraper)...")
         print("=" * 58)
         await demo2.evade_and_scrape()
-        demo2.push_to_github()
         print("  ✓  demo2 succeeded.")
         return
     except Exception as e:
@@ -34,32 +34,25 @@ async def job():
     # Fall back to demo3 ESPN only
     try:
         print("=" * 58)
-        print("  Trying demo3 (Regex ESPN)...")
+        print("  Trying demo3 (adapt ESPN)...")
         print("=" * 58)
-        data = await demo3.scrape_and_extract(ESPN_SITE_KEY)
-        demo3.print_results(data, demo3.SITES[ESPN_SITE_KEY]["name"])
-        if data:
-            demo3.save_to_csv(data, "stats_espn.csv")
-            demo3.save_html({ESPN_SITE_KEY: data}, "dashboard.html")
-            demo3.push_to_github()
+        demo3.run_espn()
         print("  ✓  demo3 succeeded.")
+        return
     except Exception as e:
-        print(f"  ✗  demo3 also failed: {e}")
+        print(f"  ✗  demo3 failed: {e}")
     
-    # Fall back to demo4 ESPN only
+    # Fall back to demo4 AI ESPN only
     try:
         print("=" * 58)
-        print("  Trying demo3 (AI-assisted, ESPN)...")
+        print("  Trying demo3 (adapt ESPN)...")
         print("=" * 58)
-        data = await demo4.scrape_and_extract(ESPN_SITE_KEY)
-        demo4.print_results(data, demo3.SITES[ESPN_SITE_KEY]["name"])
-        if data:
-            demo4.save_to_csv(data, "stats_espn.csv")
-            demo4.save_html({ESPN_SITE_KEY: data}, "dashboard.html")
-            demo4.push_to_github()
-        print("  ✓  demo4 succeeded.")
+        demo4.run_espn()
+        print("  ✓  demo3 succeeded.")
+        return
     except Exception as e:
-        print(f"  ✗  demo4 also failed: {e}")
+        print(f"  ✗  demo3 failed: {e}")
+        
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 

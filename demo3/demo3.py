@@ -4,7 +4,7 @@ scraper.py — Resilient box score scraper (function library)
 Call parse_args() to get the source, then use:
   - load_html(args)        → raw HTML string
   - scrape_resilient(html) → structured dict
-  - send_email(data)       → emails stats to yourself
+  - send_discord(data)     → sends stats to Discord
 
 Args (exactly one per run):
   --v1     hosted HTML, V1 layout (table + semantic classes)
@@ -16,13 +16,8 @@ Args (exactly one per run):
 from bs4 import BeautifulSoup
 import re
 import argparse
-import asyncio
-import time
-import schedule
-import smtplib
 import os
 import requests
-from email.mime.text import MIMEText
 from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
@@ -252,10 +247,10 @@ def analyze(data: dict):
 
 
 # =============================================================================
-# EMAIL
+# DISCORD
 # =============================================================================
 
-def send_email(data: dict):
+def send_discord(data: dict):
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
     advantage_str, top_props, team_stats = analyze(data)
 
@@ -267,30 +262,24 @@ def send_email(data: dict):
         else "Score unavailable"
     )
 
-    body  = f"2026 NCAA Championship — {' vs '.join(team_names)}\n"
-    body += f"{score_line}\n"
-    body += f"Last updated: {now}\n"
-    body += "=" * 40 + "\n\n"
-
-    body += f"ADVANTAGE: {advantage_str}\n"
-    body += "Based on fewest turnovers and highest field goal percentage.\n\n"
-
-    body += "TEAM TOTALS\n"
-    body += "-" * 30 + "\n"
+    body  = f"**NCAA Championship — {' vs '.join(team_names)}**\n"
+    body += f"`{score_line}`\n"
+    body += f"`{now}`\n"
+    body += f"\n**ADVANTAGE:** {advantage_str}\n"
+    body += "\n**TEAM TOTALS**\n"
     for team, stats in team_stats.items():
-        body += f"{team}: TOV: {stats['tov']}  FG%: {stats['fg_pct']:.1%}\n"
-
-    body += "\nTOP PROPS — Best FG% & Fewest Turnovers\n"
-    body += "-" * 30 + "\n"
+        body += f"{team}: TOV {stats['tov']}  FG% {stats['fg_pct']:.1%}\n"
+    body += "\n**TOP PROPS**\n"
     for p in top_props:
-        body += f"{p['player']} ({p['team']})  FG%: {p['fg_pct']:.1%}  TOV: {p['tov']}\n"
+        body += f"{p['player']} ({p['team']})  FG% {p['fg_pct']:.1%}  TOV {p['tov']}\n"
 
-    msg = MIMEText(body)
-    msg["Subject"] = f"Game Update — {now}"
-    msg["From"]    = os.environ.get("GMAIL_USER")
-    msg["To"]      = os.environ.get("GMAIL_USER")
-
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(os.environ.get("GMAIL_USER"), os.environ.get("GMAIL_APP_PASSWORD"))
-        server.send_message(msg)
-    print("  ✓  Email sent.")
+    requests.post(DISCORD_WEBHOOK, json={"content": body})
+    print("  ✓  Discord message sent.")
+    
+def run_espn():
+    class Args:
+        v1 = v2 = v3 = None
+        espn = True
+    html = load_html(Args())
+    data = scrape_resilient(html)
+    send_discord(data)

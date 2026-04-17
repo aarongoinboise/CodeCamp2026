@@ -1,24 +1,14 @@
 import demo3
 import argparse
-import schedule
-import time
-import asyncio
 
 # =============================================================================
-# JOB
+# MAIN
 # =============================================================================
 
-async def run_job(source_args):
-    html = demo3.load_html(source_args)
-    data = demo3.scrape_resilient(html)
-    demo3.send_email(data)
-
-
-async def main():
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", choices=["v1", "v2", "v3", "espn"], required=True)
-    parser.add_argument("--file",     help="local file path for v1/v2/v3")
-    parser.add_argument("--schedule", action="store_true")
+    parser.add_argument("--file", help="local file path for v1/v2/v3")
     args = parser.parse_args()
 
     class Args:
@@ -34,18 +24,6 @@ async def main():
     elif args.source == "v3":
         source_args.v3 = args.file
 
-    await run_job(source_args)
-
-    if args.schedule:
-        def job():
-            demo3.asyncio.run(run_job(source_args))
-
-        schedule.every(5).minutes.do(job)
-        print("Running every 5 minutes. Press CTRL+C to stop.")
-        while True:
-            schedule.run_pending()
-            time.sleep(1)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    html = demo3.load_html(source_args)
+    data = demo3.scrape_resilient(html)
+    demo3.send_discord(data)

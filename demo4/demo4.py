@@ -1,13 +1,7 @@
-import asyncio
-import argparse
-import schedule
-import time
-import smtplib
 import os
 import requests
 from bs4 import BeautifulSoup
 from ollama import Client
-from email.mime.text import MIMEText
 from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
@@ -68,38 +62,31 @@ TEXT:
 
 
 # ─────────────────────────────────────────────────────────────
-# EMAIL
+# DISCORD
 # ─────────────────────────────────────────────────────────────
 
-def send_email(results: dict):
+def send_discord(results: dict):
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
 
-    body  = f"2026 NCAA Championship — Game Update\n"
-    body += f"Last updated: {now}\n"
+    body  = f"**NCAA Championship — Game Update**\n"
+    body += f"`{now}`\n"
     body += "=" * 40 + "\n\n"
 
     for key, result in results.items():
         site_name = SITES[key]["name"]
-        body += f"{site_name}\n"
+        body += f"**{site_name}**\n"
         body += "-" * 30 + "\n"
         body += f"{result}\n\n"
 
-    msg = MIMEText(body)
-    msg["Subject"] = f"Game Update — {now}"
-    msg["From"]    = os.environ.get("GMAIL_USER")
-    msg["To"]      = os.environ.get("GMAIL_USER")
-
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(os.environ.get("GMAIL_USER"), os.environ.get("GMAIL_APP_PASSWORD"))
-        server.send_message(msg)
-    print("  ✓  Email sent.")
+    requests.post(DISCORD_WEBHOOK, json={"content": body})
+    print("  ✓  Discord message sent.")
 
 
 # ─────────────────────────────────────────────────────────────
 # JOB
 # ─────────────────────────────────────────────────────────────
 
-async def run_job(selected_sites):
+def run_job(selected_sites):
     results = {}
 
     for key in selected_sites:
@@ -110,25 +97,8 @@ async def run_job(selected_sites):
         result = extract_with_ai(text)
         results[key] = result
 
-    send_email(results)
+    send_discord(results)
     print("\nDONE")
 
-
-# ─────────────────────────────────────────────────────────────
-# MAIN
-# ─────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--sites", nargs="+", choices=list(SITES.keys()), default=list(SITES.keys()))
-    parser.add_argument("--schedule", action="store_true")
-    args = parser.parse_args()
-
-    asyncio.run(run_job(args.sites))
-
-    if args.schedule:
-        schedule.every(5).minutes.do(lambda: asyncio.run(run_job(args.sites)))
-        print("Running every 5 minutes. Press CTRL+C to stop.")
-        while True:
-            schedule.run_pending()
-            time.sleep(1)
+def run_espn():
+    run_job(["espn"])
