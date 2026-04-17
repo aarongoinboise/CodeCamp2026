@@ -1,7 +1,7 @@
 import os
 import requests
 from bs4 import BeautifulSoup
-from ollama import Client
+import google.generativeai as genai
 from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
@@ -22,8 +22,8 @@ SITES = {
 }
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
-ollama = Client()
-MODEL = "llama3.1"
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+model = genai.GenerativeModel("gemini-2.5-flash-lite")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -49,16 +49,10 @@ def clean_html(html: str) -> str:
 # ─────────────────────────────────────────────────────────────
 
 def extract_with_ai(text: str) -> str:
-    prompt = f"""
-Extract structured basketball box score data.
-
-Return JSON only.
-
-TEXT:
-{text[:20000]}
-"""
-    res = ollama.generate(model=MODEL, prompt=prompt)
-    return res["response"]
+    res = model.generate_content(
+        f"Extract structured basketball box score data. Return JSON only.\n\nTEXT:\n{text[:20000]}"
+    )
+    return res.text
 
 
 # ─────────────────────────────────────────────────────────────
