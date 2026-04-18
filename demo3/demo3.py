@@ -26,9 +26,9 @@ load_dotenv()
 
 ESPN_URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
-V1_URL   = "https://your-v1-url-here.com"
-V2_URL   = "https://your-v2-url-here.com"
-V3_URL   = "https://your-v3-url-here.com"
+V1_URL   = "https://aarongoinboise.github.io/CodeCamp2026/demo3/v1.html"
+V2_URL   = "https://aarongoinboise.github.io/CodeCamp2026/demo3/v2.html"
+V3_URL   = "https://aarongoinboise.github.io/CodeCamp2026/demo3/v3.html"
 
 COL_ORDER = ["name", "min", "pts", "fg", "3pt", "ft", "reb", "ast", "to", "stl", "blk"]
 
