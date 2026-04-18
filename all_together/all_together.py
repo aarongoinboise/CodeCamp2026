@@ -8,12 +8,10 @@ import schedule
 import time
 from demo2 import demo2
 from demo3 import demo3
-from demo4 import demo4
 import os
 from dotenv import load_dotenv
 load_dotenv()
 
-ESPN_SITE_KEY = "espn"
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 # ── Job ───────────────────────────────────────────────────────────────────────
@@ -37,17 +35,6 @@ async def job():
         print("  Trying demo3 (adapt ESPN)...")
         print("=" * 58)
         demo3.run_espn()
-        print("  ✓  demo3 succeeded.")
-        return
-    except Exception as e:
-        print(f"  ✗  demo3 failed: {e}")
-    
-    # Fall back to demo4 AI ESPN only
-    try:
-        print("=" * 58)
-        print("  Trying demo3 (adapt ESPN)...")
-        print("=" * 58)
-        demo4.run_espn()
         print("  ✓  demo3 succeeded.")
         return
     except Exception as e:
