@@ -8,7 +8,6 @@ import argparse
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", choices=["v1", "v2", "v3", "espn"], required=True)
-    parser.add_argument("--file", help="local file path for v1/v2/v3")
     args = parser.parse_args()
 
     class Args:
@@ -23,7 +22,6 @@ if __name__ == "__main__":
         source_args.v2 = args.file
     elif args.source == "v3":
         source_args.v3 = args.file
-
     html = demo3.load_html(source_args)
     data = demo3.scrape_resilient(html)
     demo3.send_discord(data)

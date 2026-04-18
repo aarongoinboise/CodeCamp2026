@@ -1,21 +1,23 @@
 """
 DEMO 2 — Getting Blocked → Getting Around It
 Part A: naive requests call → 403
-Part B: Playwright with stealth → sends Discord message with stats
+Part B: Playwright with stealth → hits ESPN API → sends Discord message with stats
 """
 
 import asyncio
 import random
+import re
 from datetime import datetime
 import os
 import requests
-from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from dotenv import load_dotenv
 load_dotenv()
 
-URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
+URL        = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
+API_URL    = "https://site.web.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/summary?event=401856600"
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
+
 
 # ── Part A: Naive — gets blocked ─────────────────────────────────────────────
 
@@ -37,19 +39,14 @@ def naive_scrape():
         print("\n      Run with --evade to see how Playwright gets through.\n")
         return
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    tables = soup.find_all("table")
-    print(f"  Tables found : {len(tables)}")
-    if not tables:
-        print("\n  ⚠  200 OK but zero tables — page is a blank React shell.")
-        print("     requests can't execute JavaScript. The data never loaded.\n")
+    print("\n  ⚠  200 OK but page is a blank React shell — no data without JS.\n")
 
 
-# ── Part B: Playwright — real browser, real data ──────────────────────────────
+# ── Part B: Playwright — grabs cookies, hits API ─────────────────────────────
 
 async def evade_and_scrape():
     print(f"\n  URL: {URL}")
-    print("  Launching Chromium with stealth settings...\n")
+    print("  Launching Chromium to grab ESPN session cookies...\n")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -84,79 +81,61 @@ async def evade_and_scrape():
             Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
         """)
 
-        print("  Navigating to box score page...")
+        print("  Navigating to ESPN to seed cookies...")
         await page.goto(URL, wait_until="domcontentloaded", timeout=60000)
-
-        try:
-            await page.wait_for_selector(".Table__TBODY", timeout=15000)
-            print("  ✓  Box score tables detected in DOM\n")
-        except Exception:
-            print("  ⚠  Timed out waiting for tables — trying anyway...\n")
-
         await asyncio.sleep(random.uniform(1.5, 2.5))
 
-        tables = await page.evaluate("""
-            () => {
-                return Array.from(document.querySelectorAll('table')).map((t, i) => {
-                    const headers = Array.from(t.querySelectorAll('th'))
-                        .map(th => th.innerText.trim()).filter(Boolean);
-                    const rows = Array.from(t.querySelectorAll('tr')).map(tr =>
-                        Array.from(tr.querySelectorAll('td')).map(td => td.innerText.trim())
-                    ).filter(r => r.length > 0);
-                    return { index: i, headers, rows };
-                });
-            }
-        """)
-
+        cookies = await context.cookies()
         await browser.close()
-        print(f"  Browser closed. Found {len(tables)} tables.\n")
 
-        stat_headers = ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK", "OREB", "DREB", "PF"]
-        teams = [
-            ("UConn Huskies",       tables[1], tables[2]),
-            ("Michigan Wolverines", tables[3], tables[4]),
-        ]
+    print(f"  ✓  {len(cookies)} cookies captured\n")
 
-        all_rows = []
-        for team_name, name_table, stat_table in teams:
-            is_starter = True
+    # Convert Playwright cookies to requests format
+    session = requests.Session()
+    for c in cookies:
+        session.cookies.set(c["name"], c["value"], domain=c["domain"])
 
-            clean_stats = []
-            for row in stat_table['rows']:
-                if not row:          continue
-                if row[0] == 'MIN':  continue
-                if row[0] == '':     continue
-                if '%' in row[0]:    continue
-                clean_stats.append(row)
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Referer": URL,
+        "Accept": "application/json",
+    })
 
-            stat_idx = 0
-            for name_row in name_table['rows']:
-                cell = name_row[0].replace('\n', ' ').strip() if name_row else ''
-                if not cell:           continue
-                if cell == 'STARTERS': is_starter = True;  continue
-                if cell == 'BENCH':    is_starter = False; continue
-                if cell == 'TEAM':     continue
+    print(f"  Hitting ESPN API...")
+    resp = session.get(API_URL, timeout=15)
+    print(f"  Status: {resp.status_code}\n")
+    resp.raise_for_status()
+    data = resp.json()
 
-                stats = clean_stats[stat_idx] if stat_idx < len(clean_stats) else []
-                stat_idx += 1
+    all_rows = []
+    team_names = []
 
+    for team_data in data["boxscore"]["players"]:
+        team_name = team_data["team"]["displayName"]
+        team_names.append(team_name)
+        for group in team_data["statistics"]:
+            labels  = group["labels"]   # ["MIN","PTS","FG","3PT","FT","REB","AST","TO","STL","BLK","OREB","DREB","PF"]
+            is_bench = group.get("type", "") == "bench"
+            for athlete in group["athletes"]:
+                if not athlete.get("stats") or athlete["stats"][0] == "":
+                    continue
+                name  = athlete["athlete"]["displayName"]
+                stats = athlete["stats"]
                 record = {
                     "team":    team_name,
-                    "player":  cell,
-                    "starter": "Y" if is_starter else "N",
+                    "player":  name,
+                    "starter": "N" if is_bench else "Y",
                 }
-                for i, col in enumerate(stat_headers):
-                    record[col] = stats[i] if i < len(stats) else ""
-
+                for i, label in enumerate(labels):
+                    record[label] = stats[i] if i < len(stats) else ""
                 all_rows.append(record)
-                print(f"  {team_name[:6]}  {record['starter']}  {cell[:22]:<22}  "
-                      f"MIN={record['MIN']:>3}  PTS={record['PTS']:>3}  "
-                      f"REB={record['REB']:>3}  PF={record['PF']:>3}")
+                print(f"  {team_name[:6]} {name[:22]:<22}  "
+                      f"MIN={record.get('MIN','?'):>3}  PTS={record.get('PTS','?'):>3}  "
+                      f"FG={record.get('FG','?'):>5}  TO={record.get('TO','?'):>2}")
 
-        print(f"\n  ✓  {len(all_rows)} players parsed")
-
-        advantage_str, top_props, team_stats = analyze(all_rows)
-        send_discord(advantage_str, top_props, team_stats)
+    print(f"\n  ✓  {len(all_rows)} players parsed")
+    advantage_str, top_props, team_stats = analyze(all_rows)
+    send_discord(advantage_str, top_props, team_stats)
 
 
 # ── Analysis ──────────────────────────────────────────────────────────────────
@@ -168,29 +147,12 @@ def analyze(rows):
 
     team_stats = {}
     for team, players in teams.items():
-        total_tov = 0
-        total_fg  = 0
-        total_fga = 0
-        for p in players:
-            try: total_tov += int(p.get("TO", 0) or 0)
-            except: pass
-            fg_str = p.get("FG", "0-0") or "0-0"
-            try:
-                made, att = fg_str.split("-")
-                total_fg  += int(made)
-                total_fga += int(att)
-            except: pass
+        total_tov = sum(int(p.get("TO", 0) or 0) for p in players if p.get("TO","").isdigit())
+        fg_parts  = [p.get("FG","0-0").split("-") for p in players if "-" in p.get("FG","")]
+        total_fg  = sum(int(m) for m,a in fg_parts)
+        total_fga = sum(int(a) for m,a in fg_parts)
         fg_pct = total_fg / total_fga if total_fga else 0
         team_stats[team] = {"tov": total_tov, "fg_pct": fg_pct}
-
-    sorted_tov   = sorted(team_stats, key=lambda t: team_stats[t]["tov"])
-    sorted_fgpct = sorted(team_stats, key=lambda t: team_stats[t]["fg_pct"], reverse=True)
-
-    scores = {t: 0 for t in team_stats}
-    for rank, t in enumerate(sorted_tov):
-        scores[t] += rank
-    for rank, t in enumerate(sorted_fgpct):
-        scores[t] += (len(team_stats) - 1 - rank)
 
     t1, t2 = list(team_stats.keys())
     if team_stats[t1]["tov"] == team_stats[t2]["tov"] and team_stats[t1]["fg_pct"] == team_stats[t2]["fg_pct"]:
@@ -205,21 +167,17 @@ def analyze(rows):
 
     player_scores = []
     for row in rows:
-        name = row.get("player", "")
-        if not name:
-            continue
         try:
             tov    = int(row.get("TO", 0) or 0)
             fg_str = row.get("FG", "0-0") or "0-0"
             made, att = fg_str.split("-")
             fg_pct = int(made) / int(att) if int(att) > 0 else 0
-            score  = fg_pct - (tov * 0.05)
             player_scores.append({
-                "player": name,
+                "player": row["player"],
                 "team":   row["team"],
                 "tov":    tov,
                 "fg_pct": fg_pct,
-                "score":  score,
+                "score":  fg_pct - (tov * 0.05),
             })
         except:
             continue
@@ -233,7 +191,7 @@ def analyze(rows):
 def send_discord(advantage_str, top_props, team_stats):
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
 
-    body = f"**NCAA Championship — Michigan vs UConn**\n`{now}`\n"
+    body  = f"**NCAA Championship — Michigan vs UConn**\n`{now}`\n"
     body += f"\n**ADVANTAGE:** {advantage_str}\n"
     body += "\n**TEAM TOTALS**\n"
     for team, stats in team_stats.items():
