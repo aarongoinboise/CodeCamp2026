@@ -1,150 +1,65 @@
-from bs4 import BeautifulSoup
-import pandas as pd
-import re
-import argparse
 import os
+import json
 import requests
+from google import genai
+from bs4 import BeautifulSoup
 from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
-ESPN_URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
+# https://aistudio.google.com/
+
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
-V1_URL = "https://aarongoinboise.github.io/CodeCamp2026/demo3/v1.html"
-V2_URL = "https://aarongoinboise.github.io/CodeCamp2026/demo3/v2.html"
-V3_URL = "https://aarongoinboise.github.io/CodeCamp2026/demo3/v3.html"
+V1_URL   = "https://aarongoinboise.github.io/CodeCamp2026/demo3/v1.html"
+V2_URL   = "https://aarongoinboise.github.io/CodeCamp2026/demo3/v2.html"
+V3_URL   = "https://aarongoinboise.github.io/CodeCamp2026/demo3/v3.html"
+ESPN_URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
 
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--v1",   action="store_true")
-    group.add_argument("--v2",   action="store_true")
-    group.add_argument("--v3",   action="store_true")
-    group.add_argument("--espn", action="store_true")
-    return parser.parse_args()
-
-
-def load_html(args) -> str:
-    url = ESPN_URL if args.espn else V1_URL if args.v1 else V2_URL if args.v2 else V3_URL
-    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"}
+def fetch_text(url):
+    headers = {"User-Agent": "Mozilla/5.0"}
     resp = requests.get(url, headers=headers, timeout=15)
     resp.raise_for_status()
-    return resp.text
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for tag in soup(["script", "style", "noscript"]):
+        tag.decompose()
+    return soup.get_text(separator="\n", strip=True)
 
 
-def is_stat_table(df):
-    """Return True if this dataframe looks like a box score stat table."""
-    cols = [str(c).upper() for c in df.columns]
-    return any(c in cols for c in ["FG", "PTS", "MIN", "REB", "AST", "TO"])
+def extract_with_ai(text):
+    prompt = f"""
+From this basketball box score page text, extract:
+- Both team names
+- Each player's: name, team, MIN, PTS, FG, 3PT, FT, REB, AST, TO, STL, BLK
+
+Rules:
+- Player name should be the full name only, no abbreviated version appended
+- Only include players who actually played (have a MIN value)
+- team field must exactly match one of the two team names
+- make absolutely sure each player is assigned to the correct team they play for
+- Team B players must be assigned to Team B, not Team A
+
+Return JSON only, no markdown:
+{{
+  "team_names": ["Team A", "Team B"],
+  "players": [
+    {{"name": "Player Name", "team": "Team A", "min": "32", "pts": "14", "fg": "5-10", "3pt": "2-4", "ft": "2-2", "reb": "4", "ast": "3", "to": "1", "stl": "0", "blk": "0"}}
+  ]
+}}
+
+TEXT:
+{text[:25000]}
+"""
+    res = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+    raw = res.text.strip().replace("```json", "").replace("```", "")
+    return json.loads(raw)
 
 
-def extract_players_from_tables(html):
-    """Use pandas to grab all tables, find the stat ones, return player rows."""
-    try:
-        all_tables = pd.read_html(html)
-    except Exception:
-        return [], []
-
-    stat_tables = [t for t in all_tables if is_stat_table(t)]
-    if not stat_tables:
-        return [], []
-
-    players = []
-    totals  = []
-    for team_idx, df in enumerate(stat_tables[:2]):  # only first 2 stat tables = 2 teams
-        df.columns = [str(c).upper() for c in df.columns]
-        for _, row in df.iterrows():
-            name = str(row.get("PLAYER", row.iloc[0])).strip()
-            if not name or name.upper() in ("STARTERS", "BENCH", "TOTALS", "TEAM", "NAN", "PLAYER"):
-                continue
-            fg = str(row.get("FG", "")).strip()
-            if name.upper() == "TOTALS" or not re.search(r'\d', name):
-                totals.append({"team_idx": team_idx, "fg": fg, "to": str(row.get("TO", "0"))})
-                continue
-            players.append({
-                "team_idx": team_idx,
-                "name":  name,
-                "min":   str(row.get("MIN", "")),
-                "pts":   str(row.get("PTS", "")),
-                "fg":    fg,
-                "3pt":   str(row.get("3PT", "")),
-                "ft":    str(row.get("FT", "")),
-                "reb":   str(row.get("REB", "")),
-                "ast":   str(row.get("AST", "")),
-                "to":    str(row.get("TO",  "")),
-                "stl":   str(row.get("STL", "")),
-                "blk":   str(row.get("BLK", "")),
-            })
-    return players, totals
-
-
-def extract_players_from_divs(html):
-    """Fallback for div/span grid layouts (v3) — find rows with 3+ FG patterns."""
-    soup = BeautifulSoup(html, "html.parser")
-    players = []
-    team_idx = -1
-
-    for el in soup.find_all(True):
-        text = el.get_text(strip=True).upper()
-        if text == "STARTERS":
-            team_idx += 1
-            continue
-        children = [c.get_text(strip=True) for c in el.find_all(recursive=False) if c.get_text(strip=True)]
-        if len(children) < 5:
-            continue
-        fg_count = sum(1 for c in children if re.match(r"^\d{1,2}-\d{1,2}$", c))
-        if fg_count < 2:
-            continue
-        players.append({
-            "team_idx": team_idx,
-            "name":  children[0],
-            "min":   children[1] if len(children) > 1 else "",
-            "pts":   children[2] if len(children) > 2 else "",
-            "fg":    children[3] if len(children) > 3 else "",
-            "3pt":   children[4] if len(children) > 4 else "",
-            "ft":    children[5] if len(children) > 5 else "",
-            "reb":   children[6] if len(children) > 6 else "",
-            "ast":   children[7] if len(children) > 7 else "",
-            "to":    children[8] if len(children) > 8 else "",
-            "stl":   children[9] if len(children) > 9 else "",
-            "blk":   children[10] if len(children) > 10 else "",
-        })
-    return players, []
-
-
-def extract_team_names(html):
-    soup = BeautifulSoup(html, "html.parser")
-    names = []
-    for el in soup.find_all(["div", "span", "h1", "h2", "a"]):
-        cls = " ".join(el.get("class", []))
-        t = el.get_text(strip=True)
-        if re.search(r"team.?name|TeamName|team.?title", cls, re.I):
-            if t and len(t) > 3 and t not in names:
-                names.append(t)
-        if len(names) >= 2:
-            break
-    return names[:2]
-
-
-def scrape_resilient(html: str) -> dict:
-    players, totals = extract_players_from_tables(html)
-    if not players:
-        players, totals = extract_players_from_divs(html)
-    return {
-        "team_names": extract_team_names(html),
-        "players":    players,
-        "totals":     totals,
-    }
-
-
-def analyze(data: dict):
+def analyze(data):
     players    = data["players"]
-    team_names = data.get("team_names", [])
-
-    for p in players:
-        idx = p.get("team_idx", 0)
-        p["team"] = team_names[idx] if idx < len(team_names) else f"Team {idx+1}"
+    team_names = data["team_names"]
 
     teams = {}
     for p in players:
@@ -152,18 +67,17 @@ def analyze(data: dict):
 
     team_stats = {}
     for team, roster in teams.items():
-        total_tov = 0
-        total_fg  = 0
-        total_fga = 0
+        tov = 0
+        fg  = 0
+        fga = 0
         for p in roster:
-            try: total_tov += int(p.get("to") or 0)
+            try: tov += int(p.get("to") or 0)
             except: pass
             try:
-                made, att = (p.get("fg") or "0-0").split("-")
-                total_fg  += int(made)
-                total_fga += int(att)
+                m, a = (p.get("fg") or "0-0").split("-")
+                fg += int(m); fga += int(a)
             except: pass
-        team_stats[team] = {"tov": total_tov, "fg_pct": total_fg / total_fga if total_fga else 0}
+        team_stats[team] = {"tov": tov, "fg_pct": fg / fga if fga else 0}
 
     if len(team_stats) < 2:
         return "Not enough data", [], team_stats
@@ -176,22 +90,32 @@ def analyze(data: dict):
     for p in players:
         try:
             tov = int(p.get("to") or 0)
-            made, att = (p.get("fg") or "0-0").split("-")
-            fg_pct = int(made) / int(att) if int(att) > 0 else 0
-            player_scores.append({"player": p["name"], "team": p["team"], "tov": tov, "fg_pct": fg_pct, "score": fg_pct - tov * 0.05})
-        except:
-            continue
+            m, a = (p.get("fg") or "0-0").split("-")
+            fg_pct = int(m) / int(a) if int(a) > 0 else 0
+            player_scores.append({
+                "player": p["name"],
+                "team":   p["team"],
+                "tov":    tov,
+                "fg_pct": fg_pct,
+                "score":  fg_pct - tov * 0.05
+            })
+        except: continue
 
-    top_props = sorted(player_scores, key=lambda x: x["score"], reverse=True)[:3]
+    sorted_players = sorted(player_scores, key=lambda x: x["score"], reverse=True)
+    top_props = []
+    if sorted_players:
+        cutoff = sorted_players[min(2, len(sorted_players)-1)]["score"]
+        top_props = [p for p in sorted_players if p["score"] >= cutoff]
     return advantage_str, top_props, team_stats
 
 
-def send_discord(data: dict):
+def send_discord(data):
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
     advantage_str, top_props, team_stats = analyze(data)
-    team_names = data.get("team_names", ["Team 1", "Team 2"])
+    team_names = data["team_names"]
 
-    body  = f"**NCAA Championship — {' vs '.join(team_names)}**\n`{now}`\n"
+    body  = f"**NCAA Championship — {' vs '.join(team_names)}**\n"
+    body += f"`{now}`\n"
     body += f"\n**ADVANTAGE:** {advantage_str}\n"
     body += "\n**TEAM TOTALS**\n"
     for team, stats in team_stats.items():
@@ -204,10 +128,12 @@ def send_discord(data: dict):
     print("  ✓  Discord message sent.")
 
 
-def run_espn():
-    class Args:
-        v1 = v2 = v3 = None
-        espn = True
-    html = load_html(Args())
-    data = scrape_resilient(html)
+def run(url):
+    text = fetch_text(url)
+    data = extract_with_ai(text)
     send_discord(data)
+
+def run_v1():   run(V1_URL)
+def run_v2():   run(V2_URL)
+def run_v3():   run(V3_URL)
+def run_espn(): run(ESPN_URL)

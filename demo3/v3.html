@@ -10,30 +10,26 @@
   .subnav span { cursor: pointer; }
   .container { max-width: 1200px; margin: 20px auto; background: white; padding: 20px; }
 
-  /* SCORE HEADER */
   .ScoreHeader { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #ddd; padding-bottom: 15px; }
   .ScoreHeader__TeamName { text-align: center; flex: 1; font-size: 15px; font-weight: bold; }
   .ScoreHeader__Score { font-size: 36px; font-weight: bold; display: block; }
   .ScoreHeader__Info { text-align: center; font-size: 13px; color: #555; }
 
-  /* TABS */
   .NavTabs { display: flex; border-bottom: 2px solid #ddd; margin-top: 15px; }
   .NavTabs__item { padding: 10px 15px; cursor: pointer; }
   .NavTabs__item--active { border-bottom: 3px solid #d00; font-weight: bold; }
 
-  /* LINESCORE - div grid */
   .Linescore { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; border: 1px solid #ddd; margin-top: 15px; font-size: 13px; }
   .Linescore__cell { padding: 6px; border-right: 1px solid #ddd; border-bottom: 1px solid #ddd; text-align: center; }
   .Linescore__cell--header { background: #f7f7f7; font-weight: bold; }
   .Linescore__cell--left { text-align: left; }
 
-  /* BOX SCORE - div grid */
   .BoxScoreWrapper { display: flex; gap: 20px; margin-top: 20px; }
   .BoxScoreTeam { flex: 1; }
   .BoxScoreTeam__name { font-weight: bold; padding: 8px; background: #f7f7f7; border: 1px solid #ddd; }
   .BoxScoreTeam__label { background: #eee; font-size: 12px; padding: 6px; text-transform: uppercase; }
 
-  .BoxScoreRow { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr; border-bottom: 1px solid #ddd; font-size: 13px; }
+  .BoxScoreRow { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr; border-bottom: 1px solid #ddd; font-size: 13px; }
   .BoxScoreRow--header { background: #f7f7f7; font-weight: bold; }
   .BoxScoreRow--totals { font-weight: bold; background: #fafafa; }
   .BoxScoreCell { padding: 6px; text-align: center; border-right: 1px solid #ddd; }
@@ -51,7 +47,6 @@
 
 <div class="container">
 
-  <!-- SCORE HEADER -->
   <div class="ScoreHeader">
     <div>
       <span class="ScoreHeader__TeamName">Team A</span>
@@ -64,14 +59,12 @@
     </div>
   </div>
 
-  <!-- TABS -->
   <div class="NavTabs">
     <div class="NavTabs__item">Play-by-Play</div>
     <div class="NavTabs__item NavTabs__item--active">Box Score</div>
     <div class="NavTabs__item">Team Stats</div>
   </div>
 
-  <!-- LINESCORE (div grid, no table) -->
   <div class="Linescore">
     <div class="Linescore__cell Linescore__cell--header Linescore__cell--left">Team</div>
     <div class="Linescore__cell Linescore__cell--header">1H</div>
@@ -89,7 +82,6 @@
     <div class="Linescore__cell">72</div>
   </div>
 
-  <!-- BOX SCORE (div grid, no table) -->
   <div class="BoxScoreWrapper">
 
     <!-- TEAM A -->
@@ -102,21 +94,21 @@
         <span class="BoxScoreCell">MIN</span><span class="BoxScoreCell">FG</span>
         <span class="BoxScoreCell">3PT</span><span class="BoxScoreCell">FT</span>
         <span class="BoxScoreCell">REB</span><span class="BoxScoreCell">AST</span>
-        <span class="BoxScoreCell">PTS</span>
+        <span class="BoxScoreCell">TO</span><span class="BoxScoreCell">PTS</span>
       </div>
       <div class="BoxScoreRow">
         <span class="BoxScoreCell BoxScoreCell--name">Player 1</span>
         <span class="BoxScoreCell">32</span><span class="BoxScoreCell">8-15</span>
         <span class="BoxScoreCell">2-5</span><span class="BoxScoreCell">4-4</span>
         <span class="BoxScoreCell">7</span><span class="BoxScoreCell">5</span>
-        <span class="BoxScoreCell">22</span>
+        <span class="BoxScoreCell">2</span><span class="BoxScoreCell">22</span>
       </div>
       <div class="BoxScoreRow">
         <span class="BoxScoreCell BoxScoreCell--name">Player 2</span>
         <span class="BoxScoreCell">28</span><span class="BoxScoreCell">5-10</span>
         <span class="BoxScoreCell">1-3</span><span class="BoxScoreCell">2-2</span>
         <span class="BoxScoreCell">4</span><span class="BoxScoreCell">3</span>
-        <span class="BoxScoreCell">13</span>
+        <span class="BoxScoreCell">1</span><span class="BoxScoreCell">13</span>
       </div>
 
       <div class="BoxScoreTeam__label">Bench</div>
@@ -125,7 +117,7 @@
         <span class="BoxScoreCell">15</span><span class="BoxScoreCell">3-6</span>
         <span class="BoxScoreCell">1-2</span><span class="BoxScoreCell">0-0</span>
         <span class="BoxScoreCell">2</span><span class="BoxScoreCell">1</span>
-        <span class="BoxScoreCell">7</span>
+        <span class="BoxScoreCell">0</span><span class="BoxScoreCell">7</span>
       </div>
 
       <div class="BoxScoreRow BoxScoreRow--totals">
@@ -133,7 +125,7 @@
         <span class="BoxScoreCell"></span><span class="BoxScoreCell">25-60</span>
         <span class="BoxScoreCell">6-18</span><span class="BoxScoreCell">12-14</span>
         <span class="BoxScoreCell">35</span><span class="BoxScoreCell">18</span>
-        <span class="BoxScoreCell">78</span>
+        <span class="BoxScoreCell">3</span><span class="BoxScoreCell">78</span>
       </div>
     </div>
 
@@ -147,14 +139,14 @@
         <span class="BoxScoreCell">MIN</span><span class="BoxScoreCell">FG</span>
         <span class="BoxScoreCell">3PT</span><span class="BoxScoreCell">FT</span>
         <span class="BoxScoreCell">REB</span><span class="BoxScoreCell">AST</span>
-        <span class="BoxScoreCell">PTS</span>
+        <span class="BoxScoreCell">TO</span><span class="BoxScoreCell">PTS</span>
       </div>
       <div class="BoxScoreRow">
         <span class="BoxScoreCell BoxScoreCell--name">Player 1</span>
         <span class="BoxScoreCell">34</span><span class="BoxScoreCell">7-14</span>
         <span class="BoxScoreCell">3-6</span><span class="BoxScoreCell">2-3</span>
         <span class="BoxScoreCell">6</span><span class="BoxScoreCell">4</span>
-        <span class="BoxScoreCell">19</span>
+        <span class="BoxScoreCell">1</span><span class="BoxScoreCell">19</span>
       </div>
 
       <div class="BoxScoreTeam__label">Bench</div>
@@ -163,7 +155,7 @@
         <span class="BoxScoreCell">18</span><span class="BoxScoreCell">4-8</span>
         <span class="BoxScoreCell">2-4</span><span class="BoxScoreCell">1-1</span>
         <span class="BoxScoreCell">3</span><span class="BoxScoreCell">2</span>
-        <span class="BoxScoreCell">11</span>
+        <span class="BoxScoreCell">1</span><span class="BoxScoreCell">11</span>
       </div>
 
       <div class="BoxScoreRow BoxScoreRow--totals">
@@ -171,7 +163,7 @@
         <span class="BoxScoreCell"></span><span class="BoxScoreCell">24-58</span>
         <span class="BoxScoreCell">7-20</span><span class="BoxScoreCell">17-21</span>
         <span class="BoxScoreCell">30</span><span class="BoxScoreCell">15</span>
-        <span class="BoxScoreCell">72</span>
+        <span class="BoxScoreCell">2</span><span class="BoxScoreCell">72</span>
       </div>
     </div>
 
