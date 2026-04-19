@@ -1,9 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
-import schedule
-import time
-import argparse
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -196,15 +193,4 @@ def job():
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--schedule", action="store_true", help="Run every 5 minutes")
-    args = parser.parse_args()
-
     job()
-
-    if args.schedule:
-        schedule.every(5).minutes.do(job)
-        print("Running every 5 minutes. Press CTRL+C to stop.")
-        while True:
-            schedule.run_pending()
-            time.sleep(1)

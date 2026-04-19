@@ -6,7 +6,6 @@ Part B: Playwright with stealth → hits ESPN API → sends Discord message with
 
 import asyncio
 import random
-import re
 from datetime import datetime
 import os
 import requests

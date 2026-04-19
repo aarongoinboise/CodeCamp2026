@@ -12,10 +12,7 @@ import schedule
 import time
 from demo2 import demo2
 from demo3 import demo3
-from dotenv import load_dotenv
-load_dotenv()
 
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 # ── Job ───────────────────────────────────────────────────────────────────────
 
