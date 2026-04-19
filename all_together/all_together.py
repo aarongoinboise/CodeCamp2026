@@ -2,13 +2,16 @@
 DEMO FALLBACK — Try demo2 first, fall back to demo3 (ESPN) if it fails.
 """
 
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import asyncio
 import argparse
 import schedule
 import time
 from demo2 import demo2
 from demo3 import demo3
-import os
 from dotenv import load_dotenv
 load_dotenv()
 
