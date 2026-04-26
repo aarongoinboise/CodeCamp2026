@@ -90,46 +90,35 @@ async def evade_and_scrape():
 
     soup = BeautifulSoup(html, "html.parser")
     all_rows = []
+    headers = ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK", "OREB", "DREB", "PF"]
 
-    # team names from the page header
-    team_name_els = soup.select("a.AnchorLink span.long-name")
-    team_names = [el.get_text(strip=True) for el in team_name_els][:2]
-    if len(team_names) < 2:
-        team_names = ["Team 1", "Team 2"]
+    titles = soup.select("div.Boxscore__Title")
+    sections = soup.select("div.ResponsiveTable")
 
-    all_tables = soup.find_all("table")
+    for title, section in zip(titles, sections):
+        team_name = title.select_one("div.BoxscoreItem__TeamName").get_text(strip=True)
+        tables = section.find_all("table")
+        name_table = next((t for t in tables if t.find("a", href=lambda h: h and "/player/" in h)), None)
+        stat_table = next((t for t in tables if t.find(string=re.compile(r"^\d+-\d+$"))), None)
+        if not name_table or not stat_table:
+            continue
 
-    # name tables: have links to player pages
-    name_tables = [t for t in all_tables if t.find("a", href=lambda h: h and "/player/" in h)]
-
-    # stat tables: have cells matching FG format like "4-10"
-    stat_tables = [t for t in all_tables if t.find(string=re.compile(r"^\d+-\d+$"))]
-
-    for i, (name_table, stat_table) in enumerate(zip(name_tables, stat_tables)):
-        team_name = team_names[i] if i < len(team_names) else f"Team {i+1}"
-
-        # extract player names in row order
         names = []
         for row in name_table.find_all("tr"):
             a = row.find("a", href=lambda h: h and "/player/" in h)
-            names.append(a.get_text(strip=True) if a else None)
+            if a:
+                long_name = a.find("span", class_=lambda c: c and "long" in c)
+                names.append(long_name.get_text(strip=True) if long_name else a.get_text(strip=True))
 
-        headers = ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK", "OREB", "DREB", "PF"]
-        name_idx = 0
-
+        player_rows = []
         for row in stat_table.find_all("tr"):
             cells = row.find_all("td")
             values = [c.get_text(strip=True) for c in cells]
-            # only player rows have exactly 13 cells and a FG value like "4-10"
             if len(values) != 13 or not re.match(r"^\d+-\d+$", values[2]):
                 continue
+            player_rows.append(values)
 
-            # find next real name
-            while name_idx < len(names) and not names[name_idx]:
-                name_idx += 1
-            name = names[name_idx] if name_idx < len(names) else "Unknown"
-            name_idx += 1
-
+        for name, values in zip(names, player_rows):
             record = dict(zip(headers, values))
             record["player"] = name
             record["team"] = team_name
