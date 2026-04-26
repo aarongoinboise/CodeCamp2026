@@ -33,7 +33,8 @@ def naive_scrape():
     if response.status_code == 403:
         print("\n  ⛔  403 FORBIDDEN — blocked by CloudFront CDN")
         print("      ESPN never even saw this request.")
-        print("      CloudFront fingerprinted us as a bot at the network edge.")
+        print("      CloudFront fingerprinted us as a bot at the network edge:\n")
+        print(dict(response.headers))
         print("\n      Run with --evade to see how Playwright gets through.\n")
         return
 
