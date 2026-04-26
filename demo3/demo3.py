@@ -109,12 +109,13 @@ def analyze(data):
     return advantage_str, top_props, team_stats
 
 
-def send_discord(data):
+def send_discord(data, source):
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
     advantage_str, top_props, team_stats = analyze(data)
     team_names = data["team_names"]
 
-    body  = f"**NCAA Championship — {' vs '.join(team_names)}**\n"
+    body  = f"{source}\n\n"
+    body += f"**NCAA Championship — {' vs '.join(team_names)}**\n"
     body += f"`{now}`\n"
     body += f"\n**ADVANTAGE:** {advantage_str}\n"
     body += "\n**TEAM TOTALS**\n"
@@ -131,7 +132,7 @@ def send_discord(data):
 def run(url):
     text = fetch_text(url)
     data = extract_with_ai(text)
-    send_discord(data)
+    send_discord(data, url)
 
 def run_v1():   run(V1_URL)
 def run_v2():   run(V2_URL)
