@@ -8,8 +8,10 @@ import asyncio
 import random
 from datetime import datetime
 import os
-from bs4 import BeautifulSoup
 import requests
+import pandas as pd
+import re
+import io
 from playwright.async_api import async_playwright
 from dotenv import load_dotenv
 load_dotenv()
@@ -64,35 +66,24 @@ async def evade_and_scrape():
         await browser.close()
 
     print("  ✓  Page loaded, parsing...\n")
-    soup = BeautifulSoup(html, "html.parser")
+    tables = pd.read_html(io.StringIO(html))    
+    team_names = [re.sub(r'[A-Z]{2,}$', '', str(tables[0].iloc[0, 0])).strip(),
+                  re.sub(r'[A-Z]{2,}$', '', str(tables[0].iloc[1, 0])).strip()]
+
     all_rows = []
+    JUNK = {"starters", "bench", "team"}
+    name_tables = [t for t in tables if t.shape[1] == 1]
+    stat_tables  = [t for t in tables if t.shape[1] == 13]
 
-    for section in soup.find_all("table"):
-        rows = section.find_all("tr")
-        if not rows:
-            continue
-
-        col_count = len(rows[0].find_all(["td", "th"]))
-
-        if col_count == 1:
-            name_table = section
-        elif col_count == 13:
-            stat_table = section
-
-            names = [row.get_text(strip=True) for row in name_table.find_all("tr") if row.get_text(strip=True)]
-            stats = [
-                [td.get_text(strip=True) for td in row.find_all("td")]
-                for row in stat_table.find_all("tr")
-                if len(row.find_all("td")) == 13
-            ]
-            team = "Team 1" if not all_rows else "Team 2"
-
-            for name, values in zip(names, stats):
-                record = {"player": name, "team": team, **dict(zip(STAT_HEADERS, values))}
-                all_rows.append(record)
-                print(f"  {team} {name[:22]:<22}  "
-                      f"MIN={record['MIN']:>3}  PTS={record['PTS']:>3}  "
-                      f"FG={record['FG']:>5}  TO={record['TO']:>2}")
+    for idx, (nt, st) in enumerate(zip(name_tables, stat_tables)):
+        team = team_names[idx] if idx < len(team_names) else f"Team {idx+1}"
+        name_rows = [str(v) for v in nt.iloc[:, 0] if str(v).lower() not in JUNK and str(v) != "nan"]
+        stat_rows = st[pd.to_numeric(st.iloc[:, 0], errors="coerce").notna()].values.tolist()
+        for name, values in zip(name_rows, stat_rows):
+            name = re.sub(r'[A-Z]\.\s.*', '', name).strip()
+            record = {"player": name, "team": team, **dict(zip(STAT_HEADERS, values))}
+            all_rows.append(record)
+            print(f"  {team} {name[:22]:<22}  MIN={record['MIN']:>3}  PTS={record['PTS']:>3}  FG={record['FG']:>5}  TO={record['TO']:>2}")
 
     print(f"\n  ✓  {len(all_rows)} players parsed")
     advantage_str, top_props, team_stats = analyze(all_rows)
