@@ -116,7 +116,7 @@ def send_discord(data, source, at):
     team_names = data["team_names"]
 
     body  = f"{source}\n\n"
-    body += f"**NCAA Championship — {' vs '.join(team_names)}**\n"
+    body += f"DEMO 3: **NCAA Championship — {' vs '.join(team_names)}**\n"
     body += f"`{now}`\n"
     body += f"\n**ADVANTAGE:** {advantage_str}\n"
     body += "\n**TEAM TOTALS**\n"

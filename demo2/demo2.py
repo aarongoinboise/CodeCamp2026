@@ -130,7 +130,7 @@ def analyze(rows):
 
 def send_discord(advantage_str, top_props, team_stats, at):
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
-    body = f"**NCAA Championship — Michigan vs UConn**\n`{now}`\n"
+    body = f"DEMO 2: **NCAA Championship — Michigan vs UConn**\n`{now}`\n"
     body += f"\n**ADVANTAGE:** {advantage_str}\n"
     body += "\n**TEAM TOTALS**\n"
     for team, stats in team_stats.items():

@@ -1,23 +1,25 @@
 """
 DEMO FALLBACK — Try demo2 first, fall back to demo3 (ESPN) if it fails.
 """
-
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import asyncio
 import argparse
 import schedule
 import time
 from demo2 import demo2
 from demo3 import demo3
+from demo4 import demo4
+
+DEMO3_COOLDOWN_UNTIL = 0
+DEMO3_COOLDOWN_SECS  = 600
 
 
 # ── Job ───────────────────────────────────────────────────────────────────────
 
 async def job():
-    # Try demo2 first
+    global DEMO3_COOLDOWN_UNTIL
     try:
         print("=" * 58)
         print("  Trying demo2 (Playwright stealth scraper)...")
@@ -27,19 +29,33 @@ async def job():
         return
     except Exception as e:
         print(f"  ✗  demo2 failed: {e}")
-        print("  → Falling back to demo3 (AI extraction, ESPN)...")
 
-    # Fall back to demo3 ESPN only
+    if time.time() < DEMO3_COOLDOWN_UNTIL:
+        print(f"  ⏭  demo3 skipped (quota cooldown), trying demo4...")
+    else:
+        try:
+            print("=" * 58)
+            print("  Trying demo3 (adapt ESPN)...")
+            print("=" * 58)
+            demo3.run_espn(at=True)
+            print("  ✓  demo3 succeeded.")
+            return
+        except Exception as e:
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                DEMO3_COOLDOWN_UNTIL = time.time() + DEMO3_COOLDOWN_SECS
+                print(f"  ✗  demo3 quota hit, cooling down {DEMO3_COOLDOWN_SECS}s...")
+            else:
+                print(f"  ✗  demo3 failed: {e}")
+
     try:
         print("=" * 58)
-        print("  Trying demo3 (adapt ESPN)...")
+        print("  Trying demo4 (no-AI fallback)...")
         print("=" * 58)
-        demo3.run_espn(at=True)
-        print("  ✓  demo3 succeeded.")
+        demo4.run(at=True)
+        print("  ✓  demo4 succeeded.")
         return
     except Exception as e:
-        print(f"  ✗  demo3 failed: {e}")
-        
+        print(f"  ✗  demo4 failed: {e}")
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
