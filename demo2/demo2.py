@@ -61,7 +61,8 @@ async def evade_and_scrape(at=False):
         await browser.close()
 
     print("  ✓  Page loaded, parsing...\n")
-    tables = pd.read_html(io.StringIO(html))    
+    tables = pd.read_html(io.StringIO(html))   
+    print(f"{tables[0]}\n\n")
     team_names = [re.sub(r'[A-Z]{2,}$', '', str(tables[0].iloc[0, 0])).strip(),
                   re.sub(r'[A-Z]{2,}$', '', str(tables[0].iloc[1, 0])).strip()]
 
@@ -75,10 +76,11 @@ async def evade_and_scrape(at=False):
         name_rows = [str(v) for v in nt.iloc[:, 0] if str(v).lower() not in JUNK and str(v) != "nan"]
         stat_rows = st[pd.to_numeric(st.iloc[:, 0], errors="coerce").notna()].values.tolist()
         for name, values in zip(name_rows, stat_rows):
+            print(f"{name}")
             name = re.sub(r'[A-Z]\.\s.*', '', name).strip()
             record = {"player": name, "team": team, **dict(zip(STAT_HEADERS, values))}
             all_rows.append(record)
-            print(f"  {team} {name[:22]:<22}  MIN={record['MIN']:>3}  PTS={record['PTS']:>3}  FG={record['FG']:>5}  TO={record['TO']:>2}")
+            print(f"  {team} {name[:22]:<22}  MIN={record['MIN']:>3}  PTS={record['PTS']:>3}  FG={record['FG']:>5}  TO={record['TO']:>2}\n")
 
     print(f"\n  ✓  {len(all_rows)} players parsed")
     advantage_str, top_props, team_stats = analyze(all_rows)
