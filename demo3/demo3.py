@@ -59,9 +59,7 @@ TEXT:
 
 
 def analyze(data):
-    players    = data["players"]
-    team_names = data["team_names"]
-
+    players = data["players"]
     teams = {}
     for p in players:
         teams.setdefault(p["team"], []).append(p)
