@@ -6,6 +6,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import asyncio
 import argparse
+import importlib
 import schedule
 import time
 from demo2 import demo2
@@ -20,6 +21,10 @@ DEMO3_COOLDOWN_SECS  = 600
 
 async def job():
     global DEMO3_COOLDOWN_UNTIL
+    importlib.reload(demo2)
+    importlib.reload(demo3)
+    importlib.reload(demo4)
+
     try:
         print("=" * 58)
         print("  Trying demo2 (Playwright stealth scraper)...")
