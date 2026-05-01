@@ -28,4 +28,4 @@ for table in soup.find_all("table"):
 
         if data:
             pprint(data)
-            exit(1)
+            break
