@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
+DISCORD_WEBHOOK_2 = os.getenv("DISCORD_WEBHOOK")
+GENERAL_WEBHOOK = os.getenv("GENERAL_WEBHOOK")
 STAT_HEADERS = ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK", "OREB", "DREB", "PF"]
 
 
@@ -36,7 +37,7 @@ def naive_scrape():
 
 # ── Part B: Playwright — loads the real page, parses the DOM ─────────────────
 
-async def evade_and_scrape():
+async def evade_and_scrape(at=False):
     print(f"\n  URL: {URL}")
     print("  Launching Chromium...\n")
 
@@ -87,7 +88,7 @@ async def evade_and_scrape():
 
     print(f"\n  ✓  {len(all_rows)} players parsed")
     advantage_str, top_props, team_stats = analyze(all_rows)
-    send_discord(advantage_str, top_props, team_stats)
+    send_discord(advantage_str, top_props, team_stats, at)
 
 
 # ── Analysis ──────────────────────────────────────────────────────────────────
@@ -127,7 +128,7 @@ def analyze(rows):
 
 # ── Send Discord ──────────────────────────────────────────────────────────────
 
-def send_discord(advantage_str, top_props, team_stats):
+def send_discord(advantage_str, top_props, team_stats, at):
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
     body = f"**NCAA Championship — Michigan vs UConn**\n`{now}`\n"
     body += f"\n**ADVANTAGE:** {advantage_str}\n"
@@ -137,5 +138,6 @@ def send_discord(advantage_str, top_props, team_stats):
     body += "\n**TOP PROPS**\n"
     for p in top_props:
         body += f"{p['player']} ({p['team']})  FG% {p['fg_pct']:.1%}  TOV {p['tov']}\n"
-    requests.post(DISCORD_WEBHOOK, json={"content": body})
+    webhook_url = GENERAL_WEBHOOK if at else DISCORD_WEBHOOK_2
+    requests.post(webhook_url, json={"content": body})
     print("  ✓  Discord message sent.")

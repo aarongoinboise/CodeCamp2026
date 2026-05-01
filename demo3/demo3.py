@@ -11,7 +11,8 @@ load_dotenv()
 
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
+DISCORD_WEBHOOK_3 = os.getenv("DISCORD_WEBHOOK")
+GENERAL_WEBHOOK = os.getenv("GENERAL_WEBHOOK")
 V1_URL   = "https://aarongoinboise.github.io/CodeCamp2026/demo3/v1.html"
 V2_URL   = "https://aarongoinboise.github.io/CodeCamp2026/demo3/v2.html"
 V3_URL   = "https://aarongoinboise.github.io/CodeCamp2026/demo3/v3.html"
@@ -109,7 +110,7 @@ def analyze(data):
     return advantage_str, top_props, team_stats
 
 
-def send_discord(data, source):
+def send_discord(data, source, at):
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
     advantage_str, top_props, team_stats = analyze(data)
     team_names = data["team_names"]
@@ -124,17 +125,17 @@ def send_discord(data, source):
     body += "\n**TOP PROPS**\n"
     for p in top_props:
         body += f"{p['player']} ({p['team']})  FG% {p['fg_pct']:.1%}  TOV {p['tov']}\n"
-
-    requests.post(DISCORD_WEBHOOK, json={"content": body})
+    webhook_url = GENERAL_WEBHOOK if at else DISCORD_WEBHOOK_3
+    requests.post(webhook_url, json={"content": body})
     print("  ✓  Discord message sent.")
 
 
-def run(url):
+def run(url,at):
     text = fetch_text(url)
     data = extract_with_ai(text)
-    send_discord(data, url)
+    send_discord(data, url, at)
 
 def run_v1():   run(V1_URL)
 def run_v2():   run(V2_URL)
 def run_v3():   run(V3_URL)
-def run_espn(): run(ESPN_URL)
+def run_espn(at=False): run(ESPN_URL,at)

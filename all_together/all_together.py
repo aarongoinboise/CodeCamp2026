@@ -22,7 +22,7 @@ async def job():
         print("=" * 58)
         print("  Trying demo2 (Playwright stealth scraper)...")
         print("=" * 58)
-        await demo2.evade_and_scrape()
+        await demo2.evade_and_scrape(at=True)
         print("  ✓  demo2 succeeded.")
         return
     except Exception as e:
@@ -34,7 +34,7 @@ async def job():
         print("=" * 58)
         print("  Trying demo3 (adapt ESPN)...")
         print("=" * 58)
-        demo3.run_espn()
+        demo3.run_espn(at=True)
         print("  ✓  demo3 succeeded.")
         return
     except Exception as e:
