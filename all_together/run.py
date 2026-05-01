@@ -1,6 +1,3 @@
-"""
-DEMO FALLBACK — Try demo2 first, fall back to demo3 (ESPN) if it fails.
-"""
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -46,7 +43,7 @@ async def job():
             print("  ✓  demo3 succeeded.")
             return
         except Exception as e:
-            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e) or "503" in str(e) or "UNAVAILABLE" in str(e):
                 DEMO3_COOLDOWN_UNTIL = time.time() + DEMO3_COOLDOWN_SECS
                 print(f"  ✗  demo3 quota hit, cooling down {DEMO3_COOLDOWN_SECS}s...")
             else:

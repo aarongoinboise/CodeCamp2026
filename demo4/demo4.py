@@ -9,6 +9,9 @@ ESPN_URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/40185
 DISCORD_WEBHOOK_4 = os.getenv("DISCORD_WEBHOOK")
 GENERAL_WEBHOOK = os.getenv("GENERAL_WEBHOOK")
 
+
+# ── Raw Scraper ───────────────────────────────────────────────────────────────────
+
 def fetch_raw(url):
     headers = {"User-Agent": "Mozilla/5.0"}
     resp = requests.get(url, headers=headers, timeout=15)

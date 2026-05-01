@@ -19,6 +19,8 @@ V3_URL   = "https://aarongoinboise.github.io/CodeCamp2026/demo3/v3.html"
 ESPN_URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
 
 
+# ── Scraper ───────────────────────────────────────────────────────────────────
+
 def fetch_text(url):
     headers = {"User-Agent": "Mozilla/5.0"}
     resp = requests.get(url, headers=headers, timeout=15)
@@ -57,6 +59,8 @@ TEXT:
     raw = res.text.strip().replace("```json", "").replace("```", "")
     return json.loads(raw)
 
+
+# ── Analysis ──────────────────────────────────────────────────────────────────
 
 def analyze(data):
     players = data["players"]
@@ -108,13 +112,15 @@ def analyze(data):
     return advantage_str, top_props, team_stats
 
 
+# ── Send Discord ──────────────────────────────────────────────────────────────
+
 def send_discord(data, source, at):
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
     advantage_str, top_props, team_stats = analyze(data)
     team_names = data["team_names"]
 
     body  = f"{source}\n\n"
-    body += f"DEMO 3: **NCAA Championship — {' vs '.join(team_names)}**\n"
+    body += f"**DEMO 3: NCAA Championship — {' vs '.join(team_names)}**\n"
     body += f"`{now}`\n"
     body += f"\n**ADVANTAGE:** {advantage_str}\n"
     body += "\n**TEAM TOTALS**\n"
@@ -128,7 +134,7 @@ def send_discord(data, source, at):
     print("  ✓  Discord message sent.")
 
 
-def run(url,at):
+def run(url,at=False):
     text = fetch_text(url)
     data = extract_with_ai(text)
     send_discord(data, url, at)

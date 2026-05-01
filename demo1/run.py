@@ -5,7 +5,9 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+
 # ── Config ────────────────────────────────────────────────────────────────────
+
 BOXSCORE_URL = "https://www.sports-reference.com/cbb/boxscores/2026-04-06-20-michigan.html"
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
@@ -18,6 +20,7 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
     "Referer": "https://www.sports-reference.com/cbb/",
 }
+
 
 # ── Scraper ───────────────────────────────────────────────────────────────────
 
@@ -166,7 +169,7 @@ def analyze(rows):
 def send_discord(advantage_str, top_props, team_stats):
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
 
-    body = f"**NCAA Championship — Michigan vs UConn**\n`{now}`\n"
+    body = f"**DEMO 1: NCAA Championship — Michigan vs UConn**\n`{now}`\n"
     body += f"\n**ADVANTAGE:** {advantage_str}\n"
     body += "\n**TEAM TOTALS**\n"
     for team, stats in team_stats.items():

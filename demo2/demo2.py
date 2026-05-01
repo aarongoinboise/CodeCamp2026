@@ -1,9 +1,3 @@
-"""
-DEMO 2 — Getting Blocked → Getting Around It
-Part A: naive requests call → 403
-Part B: Playwright with stealth → scrapes the page directly → sends Discord message with stats
-"""
-
 import asyncio
 import random
 from datetime import datetime
@@ -35,7 +29,7 @@ def naive_scrape():
         print("      Run with --evade to see how Playwright gets through.\n")
 
 
-# ── Part B: Playwright — loads the real page, parses the DOM ─────────────────
+# ── Part B: Playwright — loads the real page, parses through HTML ─────────────────
 
 async def evade_and_scrape(at=False):
     print(f"\n  URL: {URL}")
@@ -130,7 +124,7 @@ def analyze(rows):
 
 def send_discord(advantage_str, top_props, team_stats, at):
     now = datetime.now().strftime("%b %d %Y %I:%M %p")
-    body = f"DEMO 2: **NCAA Championship — Michigan vs UConn**\n`{now}`\n"
+    body = f"**DEMO 2: NCAA Championship — Michigan vs UConn**\n`{now}`\n"
     body += f"\n**ADVANTAGE:** {advantage_str}\n"
     body += "\n**TEAM TOTALS**\n"
     for team, stats in team_stats.items():
