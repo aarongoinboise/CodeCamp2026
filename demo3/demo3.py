@@ -70,17 +70,13 @@ def analyze(data):
 
     team_stats = {}
     for team, roster in teams.items():
-        tov = 0
-        fg  = 0
-        fga = 0
-        for p in roster:
-            try: tov += int(p.get("to") or 0)
-            except: pass
-            try:
-                m, a = (p.get("fg") or "0-0").split("-")
-                fg += int(m); fga += int(a)
-            except: pass
-        team_stats[team] = {"tov": tov, "fg_pct": fg / fga if fga else 0}
+        fg_parts = [p["fg"].split("-") for p in roster if "-" in p.get("fg", "")]
+        total_fg  = sum(int(m) for m, a in fg_parts)
+        total_fga = sum(int(a) for m, a in fg_parts)
+        team_stats[team] = {
+            "tov":    sum(int(p["to"]) for p in roster if p.get("to", "").isdigit()),
+            "fg_pct": total_fg / total_fga if total_fga else 0
+        }
 
     if len(team_stats) < 2:
         return "Not enough data", [], team_stats
@@ -89,26 +85,17 @@ def analyze(data):
     adv = team_stats[advantage_team]
     advantage_str = f"{advantage_team} (TOV: {adv['tov']}, FG%: {adv['fg_pct']:.1%})"
 
-    player_scores = []
-    for p in players:
-        try:
-            tov = int(p.get("to") or 0)
-            m, a = (p.get("fg") or "0-0").split("-")
-            fg_pct = int(m) / int(a) if int(a) > 0 else 0
-            player_scores.append({
-                "player": p["name"],
-                "team":   p["team"],
-                "tov":    tov,
-                "fg_pct": fg_pct,
-                "score":  fg_pct - tov * 0.05
-            })
-        except: continue
-
-    sorted_players = sorted(player_scores, key=lambda x: x["score"], reverse=True)
-    top_props = []
-    if sorted_players:
-        cutoff = sorted_players[min(2, len(sorted_players)-1)]["score"]
-        top_props = [p for p in sorted_players if p["score"] >= cutoff]
+    top_props = sorted(
+        [{
+            "player": p["name"],
+            "team":   p["team"],
+            "tov":    int(p["to"]) if p.get("to", "").isdigit() else 0,
+            "fg_pct": int(p["fg"].split("-")[0]) / int(p["fg"].split("-")[1])
+                      if "-" in p.get("fg", "") and int(p["fg"].split("-")[1]) > 0 else 0
+        } for p in players],
+        key=lambda x: x["fg_pct"] - x["tov"] * 0.05,
+        reverse=True
+    )[:3]
     return advantage_str, top_props, team_stats
 
 
