@@ -8,13 +8,15 @@ import re
 import io
 from playwright.async_api import async_playwright
 from dotenv import load_dotenv
+from util import analyze, send_discord
 load_dotenv()
 
 URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
 DISCORD_WEBHOOK_2 = os.getenv("DISCORD_WEBHOOK")
 GENERAL_WEBHOOK = os.getenv("GENERAL_WEBHOOK")
 STAT_HEADERS = ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK", "OREB", "DREB", "PF"]
-
+TOV_MULT = 0.05
+JUNK = {"starters", "bench", "team"}
 
 # ── Part A: Naive — gets blocked ─────────────────────────────────────────────
 
@@ -59,15 +61,19 @@ async def evade_and_scrape(at=False):
         await asyncio.sleep(random.uniform(3, 5))
         html = await page.content()
         await browser.close()
-
     print("  ✓  Page loaded, parsing...\n")
+    all_rows = parse(html)
+    print(f"\n  ✓  {len(all_rows)} players parsed")
+    advantage_str, top_props, team_stats = analyze(all_rows)
+    send_discord(advantage_str, top_props, team_stats, DISCORD_WEBHOOK_2, 2, at)
+
+def parse(html):    
     tables = pd.read_html(io.StringIO(html))   
     print(f"{tables[0]}\n\n")
     team_names = [re.sub(r'[A-Z]{2,}$', '', str(tables[0].iloc[0, 0])).strip(),
                   re.sub(r'[A-Z]{2,}$', '', str(tables[0].iloc[1, 0])).strip()]
 
     all_rows = []
-    JUNK = {"starters", "bench", "team"}
     name_tables = [t for t in tables if t.shape[1] == 1]
     stat_tables  = [t for t in tables if t.shape[1] == 13]
 
@@ -82,58 +88,4 @@ async def evade_and_scrape(at=False):
             all_rows.append(record)
             print(f"  {team} {name[:22]:<22}  MIN={record['MIN']:>3}  PTS={record['PTS']:>3}  FG={record['FG']:>5}  TO={record['TO']:>2}\n")
 
-    print(f"\n  ✓  {len(all_rows)} players parsed")
-    advantage_str, top_props, team_stats = analyze(all_rows)
-    send_discord(advantage_str, top_props, team_stats, at)
-
-
-# ── Analysis ──────────────────────────────────────────────────────────────────
-
-def analyze(rows):
-    teams = {}
-    for row in rows:
-        teams.setdefault(row["team"], []).append(row)
-
-    team_stats = {}
-    for team, players in teams.items():
-        total_tov = sum(int(p["TO"]) for p in players if p.get("TO", "").isdigit())
-        fg_parts = [p["FG"].split("-") for p in players if "-" in p.get("FG", "")]
-        total_fg = sum(int(m) for m, a in fg_parts)
-        total_fga = sum(int(a) for m, a in fg_parts)
-        team_stats[team] = {
-            "tov": total_tov,
-            "fg_pct": total_fg / total_fga if total_fga else 0
-        }
-
-    advantage_team = min(team_stats, key=lambda t: (team_stats[t]["tov"], -team_stats[t]["fg_pct"]))
-    adv = team_stats[advantage_team]
-    advantage_str = f"{advantage_team} (TOV: {adv['tov']}, FG%: {adv['fg_pct']:.1%})"
-
-    top_props = sorted(
-        [{"player": p["player"], "team": p["team"],
-          "tov": int(p["TO"]) if p.get("TO", "").isdigit() else 0,
-          "fg_pct": int(p["FG"].split("-")[0]) / int(p["FG"].split("-")[1])
-                   if "-" in p.get("FG", "") and int(p["FG"].split("-")[1]) > 0 else 0}
-         for p in rows],
-        key=lambda x: x["fg_pct"] - x["tov"] * 0.05,
-        reverse=True
-    )[:3]
-
-    return advantage_str, top_props, team_stats
-
-
-# ── Send Discord ──────────────────────────────────────────────────────────────
-
-def send_discord(advantage_str, top_props, team_stats, at):
-    now = datetime.now().strftime("%b %d %Y %I:%M %p")
-    body = f"**DEMO 2: NCAA Championship — Michigan vs UConn**\n`{now}`\n"
-    body += f"\n**ADVANTAGE:** {advantage_str}\n"
-    body += "\n**TEAM TOTALS**\n"
-    for team, stats in team_stats.items():
-        body += f"{team}: TOV {stats['tov']}  FG% {stats['fg_pct']:.1%}\n"
-    body += "\n**TOP PROPS**\n"
-    for p in top_props:
-        body += f"{p['player']} ({p['team']})  FG% {p['fg_pct']:.1%}  TOV {p['tov']}\n"
-    webhook_url = GENERAL_WEBHOOK if at else DISCORD_WEBHOOK_2
-    requests.post(webhook_url, json={"content": body})
-    print("  ✓  Discord message sent.")
+    return all_rows
