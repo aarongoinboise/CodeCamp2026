@@ -2,4 +2,4 @@
 import demo1
 
 if __name__ == "__main__":
-    demo1.run()
+    demo1.job()

@@ -1,7 +1,10 @@
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import requests
 from bs4 import BeautifulSoup
-import os
-from util import analyze, send_discord
+from util.analyze import analyze_sports_reference
+from util.send_discord import send_discord
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -9,7 +12,7 @@ load_dotenv()
 # ── Config ────────────────────────────────────────────────────────────────────
 
 BOXSCORE_URL = "https://www.sports-reference.com/cbb/boxscores/2026-04-06-20-michigan.html"
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
+DISCORD_WEBHOOK_1 = os.getenv("DISCORD_WEBHOOK")
 
 HEADERS = {
     "User-Agent": (
@@ -100,7 +103,7 @@ def parse_table(table, team_name):
 def job():
     players = get_boxscore(BOXSCORE_URL)
     if players:
-        advantage_str, top_props, team_stats = analyze(players)
-        send_discord(advantage_str, top_props, team_stats)
+        advantage_str, top_props, team_stats = analyze_sports_reference(players)
+        send_discord(advantage_str, top_props, team_stats, DISCORD_WEBHOOK_1, 1, at=False)
     else:
         print("No data found.")

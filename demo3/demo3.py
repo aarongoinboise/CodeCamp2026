@@ -1,9 +1,12 @@
+import sys
 import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 import requests
 from google import genai
 from bs4 import BeautifulSoup
-from util import analyze, send_discord
+from util.analyze import analyze_general
+from util.send_discord import send_discord
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -61,7 +64,7 @@ TEXT:
 def run(url,at=False):
     text = fetch_text(url)
     data = extract_with_ai(text)
-    advantage_str, top_props, team_stats = analyze(data)
+    advantage_str, top_props, team_stats = analyze_general(data)
     send_discord(advantage_str, top_props, team_stats, DISCORD_WEBHOOK_3, 3, at)
 
 def run_v1():   run(V1_URL)

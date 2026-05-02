@@ -1,14 +1,16 @@
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import asyncio
 import random
-from datetime import datetime
-import os
 import requests
 import pandas as pd
 import re
 import io
 from playwright.async_api import async_playwright
 from dotenv import load_dotenv
-from util import analyze, send_discord
+from util.analyze import analyze_espn
+from util.send_discord import send_discord
 load_dotenv()
 
 URL = "https://www.espn.com/mens-college-basketball/boxscore/_/gameId/401856600"
@@ -64,7 +66,7 @@ async def evade_and_scrape(at=False):
     print("  ✓  Page loaded, parsing...\n")
     all_rows = parse(html)
     print(f"\n  ✓  {len(all_rows)} players parsed")
-    advantage_str, top_props, team_stats = analyze(all_rows)
+    advantage_str, top_props, team_stats = analyze_espn(all_rows)
     send_discord(advantage_str, top_props, team_stats, DISCORD_WEBHOOK_2, 2, at)
 
 def parse(html):    
